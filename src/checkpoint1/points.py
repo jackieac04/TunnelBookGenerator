@@ -3,7 +3,6 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Button
-from PIL import Image
 from segment_anything import sam_model_registry, SamPredictor
 
 
