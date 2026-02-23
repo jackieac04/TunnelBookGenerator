@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Button
+from PIL import Image
 from segment_anything import sam_model_registry, SamPredictor
 
 
@@ -82,21 +83,33 @@ class TunnelBookGenerator:
 
         # copy of the og image
         display_img = self.image_rgb.copy().astype(np.float32)
+        # array of 10 RGB colors for up to 10 layers (all rainbow colors)
+        colors = [
+            [255, 0, 0],    # Red
+            [255, 128, 0],  # Orange
+            [255, 255, 0],  # Yellow
+            [0, 255, 0],    # Green
+            [0, 128, 255],  # Blue
+            [128, 0, 255],  # Purple
+            [255, 0, 128],  # Pink
+            [128, 128, 0],  # Olive
+            [128, 0, 128],  # Purple (alternative)
+            [0, 128, 128]   # Teal
+        ]
 
-        # prev layers in blue
+        # prev layers in different colors
         for i in range(self.current_layer):
             if self.layer_masks[i] is not None:
                 mask = self.layer_masks[i]
-                # Mix 70% original pixel color + 30% blue
+                # Mix 70% original pixel color + 30% color from colors list
                 display_img[mask] = (display_img[mask] * 0.7) + \
-                    (np.array([0, 0, 255]) * 0.3)
-
-        # cur layer in green
+                    (np.array(colors[i]) * 0.3)
+        # cur layer in corresponding color
         if self.layer_masks[self.current_layer] is not None:
             mask = self.layer_masks[self.current_layer]
-            # Mix 50% original pixel color + 50% green
+            # Mix 50% original pixel color + 50% color from colors list
             display_img[mask] = (display_img[mask] * 0.5) + \
-                (np.array([0, 255, 0]) * 0.5)
+                (np.array(colors[self.current_layer]) * 0.5)
 
         display_img = display_img.astype(np.uint8)
         self.ax.imshow(display_img)
@@ -139,22 +152,22 @@ class TunnelBookGenerator:
 
 # export layers as separate transparent PNGs with original image colors and transparent background
 # for debugging
-    # def save_layers(self, output_base_name):
-    #     """Export each layer as a separate transparent PNG."""
-    #     print("\nSaving layers...")
-    #     for i, mask in enumerate(self.layer_masks):
-    #         if mask is None:
-    #             print(f"Skipping Layer {i + 1} (No mask generated)")
-    #             continue
+    def save_layers(self, output_base_name):
+        """Export each layer as a separate transparent PNG."""
+        print("\nSaving layers...")
+        for i, mask in enumerate(self.layer_masks):
+            if mask is None:
+                print(f"Skipping Layer {i + 1} (No mask generated)")
+                continue
 
-    #         # Create RGBA image with transparent background
-    #         result = np.dstack(
-    #             [self.image_rgb, np.zeros_like(mask, dtype=np.uint8)])
-    #         result[:, :, 3] = mask.astype(np.uint8) * 255
+            # Create RGBA image with transparent background
+            result = np.dstack(
+                [self.image_rgb, np.zeros_like(mask, dtype=np.uint8)])
+            result[:, :, 3] = mask.astype(np.uint8) * 255
 
-    #         output_path = f"{output_base_name}_layer_{i + 1}.png"
-    #         Image.fromarray(result, 'RGBA').save(output_path)
-    #         print(f"-> Saved: {output_path}")
+            output_path = f"{output_base_name}_layer_{i + 1}.png"
+            Image.fromarray(result, 'RGBA').save(output_path)
+            print(f"-> Saved: {output_path}")
 
 
 def main():
@@ -200,6 +213,6 @@ if __name__ == "__main__":
 #  return edges of each layer
 
 # take in edges of each layer
-# convert edges to vectors
+# convert edges to vectors .072pt 255,0,0 stroke, no fill
 # layout on 32"x18" ai file
 #  return .ai files of vectorized edge layers
