@@ -12,6 +12,8 @@ dist
 dist-ssr
 *.local
 
+/src/checkpoint1/sam_vit_h_4b8939.pth
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
