@@ -33,7 +33,6 @@ class TunnelBookGenerator:
         self.predictor.set_image(self.image_rgb)
         print(f"Image loaded")
 
-    # Handle mouse clicks on the image.
     def onclick(self, event):
         #  clicks outside the image
         if event.inaxes != self.ax:
