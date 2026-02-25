@@ -11,6 +11,7 @@ node_modules
 dist
 dist-ssr
 *.local
+__pycache__/
 
 /src/checkpoint1/sam_vit_h_4b8939.pth
 
