@@ -44,6 +44,34 @@ async function deleteSession(sessionId: string) {
   await fetch(apiUrl(`/api/sessions/${sessionId}`), { method: 'DELETE' }).catch(() => { })
 }
 
+async function exportAiLayers(sessionId: string, maskBlobs: Blob[], dpi = 72) {
+  const toBase64 = (blob: Blob): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        const result = reader.result as string
+        resolve(result.split(',')[1]) // strip "data:...;base64,"
+      }
+      reader.onerror = reject
+      reader.readAsDataURL(blob)
+    })
+
+  const masks_b64 = await Promise.all(maskBlobs.map(toBase64))
+
+  const res = await fetch(apiUrl(`/api/sessions/${sessionId}/export-ai`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ masks_b64, dpi }),
+  })
+
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '')
+    throw new Error(msg || `AI export failed (${res.status})`)
+  }
+
+  return res.blob() // zip blob
+}
+
 interface LayerColor {
   fill: string
   stroke: string
@@ -530,6 +558,7 @@ function LayerSelectionScreen({
 interface OutputScreenProps {
   imageFile: File | null
   imageUrl: string | null
+  sessionId: string | null
   sessionWidth: number
   sessionHeight: number
   totalLayers: number
@@ -537,13 +566,14 @@ interface OutputScreenProps {
   onBack: () => void
 }
 
-function OutputScreen({ imageFile, imageUrl, sessionWidth, sessionHeight, totalLayers, completedLayers, onBack }: OutputScreenProps) {
+function OutputScreen({ imageFile, imageUrl, sessionId, sessionWidth, sessionHeight, totalLayers, completedLayers, onBack }: OutputScreenProps) {
   // strip extension so files are named e.g. "my-photo_Layer1.png"
   const baseName = imageFile ? imageFile.name.replace(/\.[^/.]+$/, '') : 'output'
 
   const safeBase = baseName.replace(/\s+/g, '_')
   const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '')
   const zipName = `TunnelBook_${safeBase}_${totalLayers}layers_${stamp}.zip`
+  const aiZipName = `TunnelBook_${safeBase}_${totalLayers}layers_${stamp}_ai.zip`
 
   const loadImage = (src: string) =>
     new Promise<HTMLImageElement>((resolve, reject) => {
@@ -599,6 +629,25 @@ function OutputScreen({ imageFile, imageUrl, sessionWidth, sessionHeight, totalL
 
   const [isZipping, setIsZipping] = useState(false)
   const [zipError, setZipError] = useState<string | null>(null)
+
+  const [isExportingAi, setIsExportingAi] = useState(false)
+  const [aiExportError, setAiExportError] = useState<string | null>(null)
+
+  const handleDownloadAi = async () => {
+    if (!sessionId) return
+    setAiExportError(null)
+    setIsExportingAi(true)
+
+    try {
+      const maskBlobs = completedLayers.map(l => l.maskBlob)
+      const zipBlob = await exportAiLayers(sessionId, maskBlobs)
+      downloadBlob(aiZipName, zipBlob)
+    } catch (err: any) {
+      setAiExportError(err?.message ?? 'AI export failed')
+    } finally {
+      setIsExportingAi(false)
+    }
+  }
 
   const downloadBlob = (name: string, blob: Blob) => {
     const url = URL.createObjectURL(blob)
@@ -700,6 +749,22 @@ function OutputScreen({ imageFile, imageUrl, sessionWidth, sessionHeight, totalL
         <DownloadCloud size={18} strokeWidth={2.5} />
         {isZipping ? 'Preparing Zip…' : 'Download All Layers (.zip)'}
       </button>
+
+      <button
+        className="download-all-btn"
+        onClick={handleDownloadAi}
+        disabled={isExportingAi || !sessionId}
+        style={{ marginTop: 10, background: 'linear-gradient(135deg, #dc2626, #991b1b)' }}
+      >
+        <DownloadCloud size={18} strokeWidth={2.5} />
+        {isExportingAi ? 'Vectorising…' : 'Download as .ai (Adobe Illustrator)'}
+      </button>
+
+      {aiExportError && (
+        <div className="seg-error" style={{ marginTop: 10 }}>
+          {aiExportError}
+        </div>
+      )}
 
       {zipError && (
         <div className="seg-error" style={{ marginTop: 10 }}>
@@ -811,6 +876,7 @@ function App() {
         <OutputScreen
           imageFile={imageFile}
           imageUrl={imageUrl}
+          sessionId={sessionId}
           sessionWidth={sessionWidth}
           sessionHeight={sessionHeight}
           totalLayers={totalLayers}

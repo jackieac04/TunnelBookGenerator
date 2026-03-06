@@ -169,6 +169,244 @@ class TunnelBookGenerator:
             Image.fromarray(result, 'RGBA').save(output_path)
             print(f"-> Saved: {output_path}")
 
+    def detect_edges(self, canny_low=50, canny_high=150):
+        """Run edge detection on each masked layer, keeping outer (cut) and inner (engrave) edges in separate maps."""
+        
+        print("\nDetecting edges...")
+        edge_data = []
+
+        for i, mask in enumerate(self.layer_masks):
+            if mask is None:
+                print(f"  Layer {i + 1}: no mask, skipping")
+                edge_data.append(None)
+                continue
+
+            # --- outer edge: silhouette of the SAM mask ---
+            mask_uint8 = mask.astype(np.uint8) * 255
+            outer_edges = cv2.Canny(mask_uint8, 100, 200)
+
+            # --- inner edges: Canny on the masked image content ---
+            masked_rgb = self.image_rgb.copy()
+            masked_rgb[~mask] = 0
+            gray = cv2.cvtColor(masked_rgb, cv2.COLOR_RGB2GRAY)
+            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+            inner_edges = cv2.Canny(blurred, canny_low, canny_high)
+
+            # Remove any inner edges that overlap the outer silhouette to keep
+            # the two sets clean and non-redundant
+            inner_edges = cv2.bitwise_and(inner_edges, cv2.bitwise_not(outer_edges))
+
+            edge_data.append({"outer": outer_edges, "inner": inner_edges})
+            print(f"  Layer {i + 1}: edges detected")
+
+        return edge_data
+
+    def export_ai_files(self, output_base_name, edge_data=None,
+                        dpi=72, layout_cols=None):
+        """Vectorise edge data and export one .ai file per layer, plus a combined layout file with all layers tiled on a 32"×18" artboard."""
+        if edge_data is None:
+            edge_data = self.detect_edges()
+
+        # Artboard dimensions in points
+        ARTBOARD_W_PT = 32 * 72   # 2304 pt
+        ARTBOARD_H_PT = 18 * 72   # 1296 pt
+        STROKE_WIDTH  = 0.072     # pt
+
+        img_h_px, img_w_px = self.image_rgb.shape[:2]
+        px_to_pt = 72.0 / dpi
+        img_w_pt = img_w_px * px_to_pt
+        img_h_pt = img_h_px * px_to_pt
+
+        valid_layers = [(i, e) for i, e in enumerate(edge_data) if e is not None]
+
+        if not valid_layers:
+            print("No edge data to export.")
+            return
+
+        # --- auto layout grid for combined file ---
+        n = len(valid_layers)
+        if layout_cols is None:
+            layout_cols = max(1, int(np.ceil(np.sqrt(n * ARTBOARD_W_PT / ARTBOARD_H_PT))))
+        layout_rows = int(np.ceil(n / layout_cols))
+
+        padding_pt = 10.0
+        cell_w = (ARTBOARD_W_PT - padding_pt * (layout_cols + 1)) / layout_cols
+        cell_h = (ARTBOARD_H_PT - padding_pt * (layout_rows + 1)) / layout_rows
+        scale_to_cell = min(cell_w / img_w_pt, cell_h / img_h_pt)
+
+        per_layer_outer = []  # ps_paths lists for combined layout
+        per_layer_inner = []
+
+        print("\nExporting .ai files...")
+
+        for layer_idx, (orig_i, edata) in enumerate(valid_layers):
+            outer_ps = _contours_to_ps_paths(edata["outer"], px_to_pt, img_h_pt)
+            inner_ps = _contours_to_ps_paths(edata["inner"], px_to_pt, img_h_pt)
+
+            per_layer_outer.append(outer_ps)
+            per_layer_inner.append(inner_ps)
+
+            if not outer_ps and not inner_ps:
+                print(f"  Layer {orig_i + 1}: no contours found, skipping")
+                continue
+
+            ai_content = _build_ai_document(
+                artboard_w=ARTBOARD_W_PT,
+                artboard_h=ARTBOARD_H_PT,
+                outer_paths=outer_ps,
+                inner_paths=inner_ps,
+                offset_x=0.0,
+                offset_y=0.0,
+                content_scale=1.0,
+                stroke_width=STROKE_WIDTH,
+                layer_name=f"Layer {orig_i + 1}",
+            )
+
+            out_path = f"{output_base_name}_layer_{orig_i + 1}.ai"
+            with open(out_path, "w", encoding="latin-1") as f:
+                f.write(ai_content)
+            print(f"  -> Saved: {out_path}")
+
+        # --- combined layout ---
+        combined_blocks = []
+        for layer_idx, (orig_i, _) in enumerate(valid_layers):
+            outer_ps = per_layer_outer[layer_idx]
+            inner_ps = per_layer_inner[layer_idx]
+            if not outer_ps and not inner_ps:
+                continue
+
+            col = layer_idx % layout_cols
+            row = layer_idx // layout_cols
+            cell_x0 = padding_pt + col * (cell_w + padding_pt)
+            cell_y0 = ARTBOARD_H_PT - padding_pt - (row + 1) * (cell_h + padding_pt) + padding_pt
+            scaled_w = img_w_pt * scale_to_cell
+            scaled_h = img_h_pt * scale_to_cell
+            offset_x = cell_x0 + (cell_w - scaled_w) / 2.0
+            offset_y = cell_y0 + (cell_h - scaled_h) / 2.0
+
+            combined_blocks.append(
+                _build_layer_block(
+                    outer_paths=outer_ps,
+                    inner_paths=inner_ps,
+                    offset_x=offset_x,
+                    offset_y=offset_y,
+                    content_scale=scale_to_cell,
+                    stroke_width=STROKE_WIDTH,
+                    layer_name=f"Layer {orig_i + 1}",
+                )
+            )
+
+        combined_content = _build_ai_header(ARTBOARD_W_PT, ARTBOARD_H_PT)
+        combined_content += "\n".join(combined_blocks)
+        combined_content += _build_ai_footer()
+
+        combined_out = f"{output_base_name}_all_layers_layout.ai"
+        with open(combined_out, "w", encoding="latin-1") as f:
+            f.write(combined_content)
+        print(f"  -> Saved combined layout: {combined_out}")
+
+
+# Stroke colors
+_CUT_RGB     = (1.0, 0.0, 0.0)   # red   – outer cut
+_ENGRAVE_RGB = (0.0, 0.0, 1.0)   # blue  – inner engrave
+
+
+def _contours_to_ps_paths(edge_map: np.ndarray, px_to_pt: float, img_h_pt: float) -> list[str]:
+    """
+    Trace contours from a single-channel edge map and return a list of
+    PostScript path command strings (one string per contour).
+    Y is flipped to convert from image-space (y=0 top) to PS-space (y=0 bottom).
+    """
+    import cv2
+    contours, _ = cv2.findContours(edge_map, cv2.RETR_LIST, cv2.CHAIN_APPROX_TC89_KCOS)
+    ps_paths = []
+    for contour in contours:
+        if len(contour) < 2:
+            continue
+        pts = contour.squeeze()
+        if pts.ndim == 1:
+            pts = pts[np.newaxis, :]
+        cmds = []
+        for j, (px, py) in enumerate(pts):
+            ps_x = px * px_to_pt
+            ps_y = img_h_pt - py * px_to_pt
+            cmds.append(f"{ps_x:.4f} {ps_y:.4f} {'moveto' if j == 0 else 'lineto'}")
+        ps_paths.append("\n".join(cmds))
+    return ps_paths
+
+
+def _build_ai_header(artboard_w: float, artboard_h: float) -> str:
+    """Minimal Adobe Illustrator 8 compatible PostScript header."""
+    return f"""%!PS-Adobe-3.0
+%%Creator: TunnelBookGenerator
+%%BoundingBox: 0 0 {artboard_w:.4f} {artboard_h:.4f}
+%%HiResBoundingBox: 0.0000 0.0000 {artboard_w:.4f} {artboard_h:.4f}
+%%DocumentProcessColors: Red Blue
+%%EndComments
+%%BeginProlog
+%%EndProlog
+%%BeginSetup
+%%EndSetup
+"""
+
+
+def _build_ai_footer() -> str:
+    return "\n%%Trailer\n%%EOF\n"
+
+
+def _stroke_paths_block(paths: list[str], r: float, g: float, b: float,
+                         stroke_width: float) -> list[str]:
+    """Return PS lines that set color and stroke each path. No gsave/grestore."""
+    if not paths:
+        return []
+    lines = [
+        f"{r:.4f} {g:.4f} {b:.4f} setrgbcolor",
+        f"{stroke_width:.4f} setlinewidth",
+        "1 setlinecap",
+        "1 setlinejoin",
+        "[] 0 setdash",
+    ]
+    for path_cmds in paths:
+        lines += ["newpath", path_cmds, "stroke"]
+    return lines
+
+
+def _build_layer_block(outer_paths: list[str], inner_paths: list[str],
+                        offset_x: float, offset_y: float, content_scale: float,
+                        stroke_width: float, layer_name: str = "Layer") -> str:
+    """
+    PostScript block for one layer.
+    Outer paths → red (cut), inner paths → blue (engrave). No fill.
+    """
+    lines = [
+        f"% --- {layer_name} ---",
+        "gsave",
+        f"{offset_x:.4f} {offset_y:.4f} translate",
+        f"{content_scale:.6f} {content_scale:.6f} scale",
+    ]
+    lines += _stroke_paths_block(outer_paths, *_CUT_RGB,     stroke_width)
+    lines += _stroke_paths_block(inner_paths, *_ENGRAVE_RGB, stroke_width)
+    lines.append("grestore")
+    return "\n".join(lines) + "\n"
+
+
+def _build_ai_document(artboard_w: float, artboard_h: float,
+                        outer_paths: list[str], inner_paths: list[str],
+                        offset_x: float, offset_y: float, content_scale: float,
+                        stroke_width: float, layer_name: str = "Layer") -> str:
+    """Full single-layer .ai document."""
+    doc = _build_ai_header(artboard_w, artboard_h)
+    doc += _build_layer_block(
+        outer_paths=outer_paths,
+        inner_paths=inner_paths,
+        offset_x=offset_x,
+        offset_y=offset_y,
+        content_scale=content_scale,
+        stroke_width=stroke_width,
+        layer_name=layer_name,
+    )
+    doc += _build_ai_footer()
+    return doc
 
 def main():
     MODEL_TYPE = "vit_h"
@@ -194,7 +432,13 @@ def main():
 
         # Save output based on the original filename
         output_base = image_path.rsplit('.', 1)[0]
+
+        # Debug PNGs
         generator.save_layers(output_base)
+
+        # Edge detection → vectorisation → .ai export
+        edge_data = generator.detect_edges()
+        generator.export_ai_files(output_base, edge_data=edge_data)
 
         print("\nDone! Your tunnel book layers are ready to print and cut.")
 
@@ -204,15 +448,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-#  -- apoorva
-
-# take in images with masks applied
-# edge detection for each image
-#  return edges of each layer
-
-# take in edges of each layer
-# convert edges to vectors .072pt 255,0,0 stroke, no fill
-# layout on 32"x18" ai file
-#  return .ai files of vectorized edge layers

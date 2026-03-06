@@ -7,6 +7,7 @@ import uuid
 import numpy as np
 import tempfile
 import os
+import zipfile
 
 from points import TunnelBookGenerator
 
@@ -21,6 +22,14 @@ class SegmentRequest(BaseModel):
     points: list[list[int]]
     # 1 = foreground, 0 = background; must match points length if provided
     labels: list[int] | None = None
+
+
+class ExportAiRequest(BaseModel):
+    # List of masks, one per layer — each mask is a list of PNG bytes
+    # sent as base64. We receive them as raw PNG blobs via multipart instead;
+    # see the endpoint below for the actual approach (JSON list of base64 strings).
+    masks_b64: list[str]          # base64-encoded PNG mask per layer, in order
+    dpi: int = 72                 # source image DPI for px→pt conversion
 
 
 #  session_id -> {"gen": TunnelBookGenerator, "width": int, "height": int, ...}
@@ -122,3 +131,166 @@ async def segment(session_id: str, req: SegmentRequest):
     buf = io.BytesIO()
     out.save(buf, format="PNG")
     return Response(content=buf.getvalue(), media_type="image/png")
+
+
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str):
+    _sessions.pop(session_id, None)
+    return {"ok": True}
+
+
+@app.post("/api/sessions/{session_id}/export-ai")
+async def export_ai(session_id: str, req: ExportAiRequest):
+    """
+    Accepts one base64-encoded mask PNG per layer, runs edge detection +
+    vectorisation on each, and returns a .zip containing:
+      - one .ai file per layer  (layer_1.ai, layer_2.ai, …)
+      - one combined layout .ai (all_layers_layout.ai)
+    """
+    import base64
+
+    sess = _sessions.get(session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Unknown session")
+
+    if not req.masks_b64:
+        raise HTTPException(status_code=400, detail="No masks provided")
+
+    gen: TunnelBookGenerator = sess["gen"]
+
+    # Decode each mask PNG → boolean numpy array and store on the generator
+    gen.layer_masks = []
+    for i, b64 in enumerate(req.masks_b64):
+        try:
+            png_bytes = base64.b64decode(b64)
+            pil_mask = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
+            alpha_arr = np.array(pil_mask)[:, :, 3]   # alpha channel
+            bool_mask = alpha_arr > 127                 # threshold → boolean
+            gen.layer_masks.append(bool_mask)
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to decode mask for layer {i + 1}: {e}"
+            )
+
+    # Edge detection
+    try:
+        edge_data = gen.detect_edges()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Edge detection failed: {e}")
+
+    # Vectorise → collect .ai file contents in memory (don't write to disk)
+    try:
+        ai_files = _vectorise_to_memory(gen, edge_data, dpi=req.dpi)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Vectorisation failed: {e}")
+
+    # Pack everything into a zip and return it
+    zip_buf = io.BytesIO()
+    base = sess["filename"].rsplit(".", 1)[0]
+
+    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, content in ai_files.items():
+            zf.writestr(f"{base}_{name}", content)
+
+    zip_buf.seek(0)
+    return Response(
+        content=zip_buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{base}_layers.ai.zip"'},
+    )
+
+
+def _vectorise_to_memory(gen: TunnelBookGenerator, edge_data, dpi: int) -> dict[str, str]:
+    """
+    Returns a dict of  filename -> .ai file content (string),
+    e.g. {"layer_1.ai": "...", "layer_2.ai": "...", "all_layers_layout.ai": "..."}
+    """
+    from points import (
+        _contours_to_ps_paths, _build_ai_document,
+        _build_ai_header, _build_ai_footer, _build_layer_block,
+    )
+
+    ARTBOARD_W_PT = 32 * 72
+    ARTBOARD_H_PT = 18 * 72
+    STROKE_WIDTH  = 0.072
+
+    img_h_px, img_w_px = gen.image_rgb.shape[:2]
+    px_to_pt = 72.0 / dpi
+    img_w_pt = img_w_px * px_to_pt
+    img_h_pt = img_h_px * px_to_pt
+
+    valid_layers = [(i, e) for i, e in enumerate(edge_data) if e is not None]
+
+    if not valid_layers:
+        return {}
+
+    n = len(valid_layers)
+    layout_cols = max(1, int(np.ceil(np.sqrt(n * ARTBOARD_W_PT / ARTBOARD_H_PT))))
+    layout_rows = int(np.ceil(n / layout_cols))
+    padding_pt = 10.0
+    cell_w = (ARTBOARD_W_PT - padding_pt * (layout_cols + 1)) / layout_cols
+    cell_h = (ARTBOARD_H_PT - padding_pt * (layout_rows + 1)) / layout_rows
+    scale_to_cell = min(cell_w / img_w_pt, cell_h / img_h_pt)
+
+    results: dict[str, str] = {}
+    per_layer_outer = []
+    per_layer_inner = []
+
+    for layer_idx, (orig_i, edata) in enumerate(valid_layers):
+        outer_ps = _contours_to_ps_paths(edata["outer"], px_to_pt, img_h_pt)
+        inner_ps = _contours_to_ps_paths(edata["inner"], px_to_pt, img_h_pt)
+
+        per_layer_outer.append(outer_ps)
+        per_layer_inner.append(inner_ps)
+
+        if not outer_ps and not inner_ps:
+            continue
+
+        ai_content = _build_ai_document(
+            artboard_w=ARTBOARD_W_PT,
+            artboard_h=ARTBOARD_H_PT,
+            outer_paths=outer_ps,
+            inner_paths=inner_ps,
+            offset_x=0.0,
+            offset_y=0.0,
+            content_scale=1.0,
+            stroke_width=STROKE_WIDTH,
+            layer_name=f"Layer {orig_i + 1}",
+        )
+        results[f"layer_{orig_i + 1}.ai"] = ai_content
+
+    # combined layout
+    combined_blocks = []
+    for layer_idx, (orig_i, _) in enumerate(valid_layers):
+        outer_ps = per_layer_outer[layer_idx]
+        inner_ps = per_layer_inner[layer_idx]
+        if not outer_ps and not inner_ps:
+            continue
+        col = layer_idx % layout_cols
+        row = layer_idx // layout_cols
+        cell_x0 = padding_pt + col * (cell_w + padding_pt)
+        cell_y0 = ARTBOARD_H_PT - padding_pt - (row + 1) * (cell_h + padding_pt) + padding_pt
+        scaled_w = img_w_pt * scale_to_cell
+        scaled_h = img_h_pt * scale_to_cell
+        offset_x = cell_x0 + (cell_w - scaled_w) / 2.0
+        offset_y = cell_y0 + (cell_h - scaled_h) / 2.0
+        combined_blocks.append(
+            _build_layer_block(
+                outer_paths=outer_ps,
+                inner_paths=inner_ps,
+                offset_x=offset_x,
+                offset_y=offset_y,
+                content_scale=scale_to_cell,
+                stroke_width=STROKE_WIDTH,
+                layer_name=f"Layer {orig_i + 1}",
+            )
+        )
+
+    if combined_blocks:
+        combined = _build_ai_header(ARTBOARD_W_PT, ARTBOARD_H_PT)
+        combined += "\n".join(combined_blocks)
+        combined += _build_ai_footer()
+        results["all_layers_layout.ai"] = combined
+
+    return results
