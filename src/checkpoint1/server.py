@@ -8,6 +8,7 @@ import numpy as np
 import tempfile
 import os
 import zipfile
+import re
 
 from points import TunnelBookGenerator
 
@@ -18,7 +19,7 @@ CHECKPOINT_PATH = os.environ.get("SAM_CHECKPOINT", "sam_vit_h_4b8939.pth")
 
 
 class SegmentRequest(BaseModel):
-    # [[x,y], [x,y], ...] in ORIGINAL image pixel coords 
+    # [[x,y], [x,y], ...] in ORIGINAL image pixel coords
     points: list[list[int]]
     # 1 = foreground, 0 = background; must match points length if provided
     labels: list[int] | None = None
@@ -51,11 +52,12 @@ async def create_session(image: UploadFile = File(...)):
     except Exception:
         raise HTTPException(status_code=400, detail="Could not read image")
 
-    # generator 
+    # generator
     try:
         gen = TunnelBookGenerator(MODEL_TYPE, CHECKPOINT_PATH)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to initialize SAM: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to initialize SAM: {e}")
 
     # so write a temp file and call load_image(path)
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
@@ -63,9 +65,11 @@ async def create_session(image: UploadFile = File(...)):
         tmp_path = f.name
 
     try:
-        gen.load_image(tmp_path)  # calls predictor.set_image(...) inside points.py
+        # calls predictor.set_image(...) inside points.py
+        gen.load_image(tmp_path)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to load image in points.py: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to load image in points.py: {e}")
     finally:
         try:
             os.remove(tmp_path)
@@ -108,7 +112,8 @@ async def segment(session_id: str, req: SegmentRequest):
         point_labels = np.ones(len(clamped), dtype=np.int32)
     else:
         if len(req.labels) != len(clamped):
-            raise HTTPException(status_code=400, detail="labels must match points length")
+            raise HTTPException(
+                status_code=400, detail="labels must match points length")
         point_labels = np.array(req.labels, dtype=np.int32)
 
     try:
@@ -120,9 +125,9 @@ async def segment(session_id: str, req: SegmentRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"SAM predict failed: {e}")
 
-    mask = masks[0]  
+    mask = masks[0]
 
-    # return transparent mask PNG 
+    # return transparent mask PNG
     alpha = (mask.astype(np.uint8) * 255)
     rgba = np.zeros((alpha.shape[0], alpha.shape[1], 4), dtype=np.uint8)
     rgba[..., 3] = alpha
@@ -177,17 +182,19 @@ async def export_ai(session_id: str, req: ExportAiRequest):
     try:
         edge_data = gen.detect_edges()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Edge detection failed: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Edge detection failed: {e}")
 
     # Vectorise → collect .ai file contents in memory (don't write to disk)
     try:
         ai_files = _vectorise_to_memory(gen, edge_data, dpi=req.dpi)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Vectorisation failed: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Vectorisation failed: {e}")
 
     # Pack everything into a zip and return it
     zip_buf = io.BytesIO()
-    base = sess["filename"].rsplit(".", 1)[0]
+    base = re.sub(r'[^\x00-\x7F]+', '_', sess["filename"].rsplit(".", 1)[0])
 
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for name, content in ai_files.items():
@@ -197,7 +204,8 @@ async def export_ai(session_id: str, req: ExportAiRequest):
     return Response(
         content=zip_buf.getvalue(),
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{base}_layers.ai.zip"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{base}_layers.ai.zip"'},
     )
 
 
@@ -213,7 +221,7 @@ def _vectorise_to_memory(gen: TunnelBookGenerator, edge_data, dpi: int) -> dict[
 
     ARTBOARD_W_PT = 32 * 72
     ARTBOARD_H_PT = 18 * 72
-    STROKE_WIDTH  = 0.072
+    STROKE_WIDTH = 0.072
     MAX_CONTENT_PT = 12 * 72  # 864 pt — max 12" on either axis
 
     img_h_px, img_w_px = gen.image_rgb.shape[:2]
@@ -222,9 +230,10 @@ def _vectorise_to_memory(gen: TunnelBookGenerator, edge_data, dpi: int) -> dict[
     img_h_pt = img_h_px * px_to_pt
 
     # Per-layer: scale to 12"×12" max, centered on artboard
-    content_scale    = min(MAX_CONTENT_PT / img_w_pt, MAX_CONTENT_PT / img_h_pt, 1.0)
-    content_w_pt     = img_w_pt * content_scale
-    content_h_pt     = img_h_pt * content_scale
+    content_scale = min(MAX_CONTENT_PT / img_w_pt,
+                        MAX_CONTENT_PT / img_h_pt, 1.0)
+    content_w_pt = img_w_pt * content_scale
+    content_h_pt = img_h_pt * content_scale
     content_offset_x = (ARTBOARD_W_PT - content_w_pt) / 2.0
     content_offset_y = (ARTBOARD_H_PT - content_h_pt) / 2.0
 
@@ -234,12 +243,14 @@ def _vectorise_to_memory(gen: TunnelBookGenerator, edge_data, dpi: int) -> dict[
         return {}
 
     n = len(valid_layers)
-    layout_cols = max(1, int(np.ceil(np.sqrt(n * ARTBOARD_W_PT / ARTBOARD_H_PT))))
+    layout_cols = max(
+        1, int(np.ceil(np.sqrt(n * ARTBOARD_W_PT / ARTBOARD_H_PT))))
     layout_rows = int(np.ceil(n / layout_cols))
     padding_pt = 10.0
     cell_w = (ARTBOARD_W_PT - padding_pt * (layout_cols + 1)) / layout_cols
     cell_h = (ARTBOARD_H_PT - padding_pt * (layout_rows + 1)) / layout_rows
-    scale_to_cell = min(cell_w / img_w_pt, cell_h / img_h_pt, MAX_CONTENT_PT / img_w_pt, MAX_CONTENT_PT / img_h_pt)
+    scale_to_cell = min(cell_w / img_w_pt, cell_h / img_h_pt,
+                        MAX_CONTENT_PT / img_w_pt, MAX_CONTENT_PT / img_h_pt)
 
     results: dict[str, str] = {}
     per_layer_outer = []
@@ -263,7 +274,7 @@ def _vectorise_to_memory(gen: TunnelBookGenerator, edge_data, dpi: int) -> dict[
             offset_x=content_offset_x,
             offset_y=content_offset_y,
             content_scale=content_scale,
-            stroke_width=STROKE_WIDTH,
+            stroke_width=STROKE_WIDTH / content_scale,
             layer_name=f"Layer {orig_i + 1}",
         )
         results[f"layer_{orig_i + 1}.ai"] = ai_content
@@ -278,7 +289,8 @@ def _vectorise_to_memory(gen: TunnelBookGenerator, edge_data, dpi: int) -> dict[
         col = layer_idx % layout_cols
         row = layer_idx // layout_cols
         cell_x0 = padding_pt + col * (cell_w + padding_pt)
-        cell_y0 = ARTBOARD_H_PT - padding_pt - (row + 1) * (cell_h + padding_pt) + padding_pt
+        cell_y0 = ARTBOARD_H_PT - padding_pt - \
+            (row + 1) * (cell_h + padding_pt) + padding_pt
         scaled_w = img_w_pt * scale_to_cell
         scaled_h = img_h_pt * scale_to_cell
         offset_x = cell_x0 + (cell_w - scaled_w) / 2.0
@@ -290,7 +302,7 @@ def _vectorise_to_memory(gen: TunnelBookGenerator, edge_data, dpi: int) -> dict[
                 offset_x=offset_x,
                 offset_y=offset_y,
                 content_scale=scale_to_cell,
-                stroke_width=STROKE_WIDTH,
+                stroke_width=STROKE_WIDTH / scale_to_cell,
                 layer_name=f"Layer {orig_i + 1}",
             )
         )

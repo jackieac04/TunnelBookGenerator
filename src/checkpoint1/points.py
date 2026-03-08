@@ -171,7 +171,7 @@ class TunnelBookGenerator:
 
     def detect_edges(self, canny_low=50, canny_high=150):
         """Run edge detection on each masked layer, keeping outer (cut) and inner (engrave) edges in separate maps."""
-        
+
         print("\nDetecting edges...")
         edge_data = []
 
@@ -194,7 +194,8 @@ class TunnelBookGenerator:
 
             # Remove any inner edges that overlap the outer silhouette to keep
             # the two sets clean and non-redundant
-            inner_edges = cv2.bitwise_and(inner_edges, cv2.bitwise_not(outer_edges))
+            inner_edges = cv2.bitwise_and(
+                inner_edges, cv2.bitwise_not(outer_edges))
 
             edge_data.append({"outer": outer_edges, "inner": inner_edges})
             print(f"  Layer {i + 1}: edges detected")
@@ -210,7 +211,7 @@ class TunnelBookGenerator:
         # Artboard dimensions in points
         ARTBOARD_W_PT = 32 * 72   # 2304 pt
         ARTBOARD_H_PT = 18 * 72   # 1296 pt
-        STROKE_WIDTH  = 0.072     # pt
+        STROKE_WIDTH = 0.072     # pt
 
         # Max content size: 12" × 12" in points
         MAX_CONTENT_PT = 12 * 72  # 864 pt
@@ -221,15 +222,17 @@ class TunnelBookGenerator:
         img_h_pt = img_h_px * px_to_pt
 
         # Scale to fit within 12"×12", preserving aspect ratio
-        content_scale = min(MAX_CONTENT_PT / img_w_pt, MAX_CONTENT_PT / img_h_pt, 1.0)
-        content_w_pt  = img_w_pt * content_scale
-        content_h_pt  = img_h_pt * content_scale
+        content_scale = min(MAX_CONTENT_PT / img_w_pt,
+                            MAX_CONTENT_PT / img_h_pt, 1.0)
+        content_w_pt = img_w_pt * content_scale
+        content_h_pt = img_h_pt * content_scale
 
         # Center the scaled content on the 32"×18" artboard
         content_offset_x = (ARTBOARD_W_PT - content_w_pt) / 2.0
         content_offset_y = (ARTBOARD_H_PT - content_h_pt) / 2.0
 
-        valid_layers = [(i, e) for i, e in enumerate(edge_data) if e is not None]
+        valid_layers = [(i, e)
+                        for i, e in enumerate(edge_data) if e is not None]
 
         if not valid_layers:
             print("No edge data to export.")
@@ -238,7 +241,8 @@ class TunnelBookGenerator:
         # --- auto layout grid for combined file ---
         n = len(valid_layers)
         if layout_cols is None:
-            layout_cols = max(1, int(np.ceil(np.sqrt(n * ARTBOARD_W_PT / ARTBOARD_H_PT))))
+            layout_cols = max(
+                1, int(np.ceil(np.sqrt(n * ARTBOARD_W_PT / ARTBOARD_H_PT))))
         layout_rows = int(np.ceil(n / layout_cols))
 
         padding_pt = 10.0
@@ -246,7 +250,8 @@ class TunnelBookGenerator:
         cell_h = (ARTBOARD_H_PT - padding_pt * (layout_rows + 1)) / layout_rows
 
         # Scale to fit inside cell but also respect the 12"×12" cap
-        scale_to_cell = min(cell_w / img_w_pt, cell_h / img_h_pt, MAX_CONTENT_PT / img_w_pt, MAX_CONTENT_PT / img_h_pt)
+        scale_to_cell = min(cell_w / img_w_pt, cell_h / img_h_pt,
+                            MAX_CONTENT_PT / img_w_pt, MAX_CONTENT_PT / img_h_pt)
 
         per_layer_outer = []  # ps_paths lists for combined layout
         per_layer_inner = []
@@ -254,8 +259,10 @@ class TunnelBookGenerator:
         print("\nExporting .ai files...")
 
         for layer_idx, (orig_i, edata) in enumerate(valid_layers):
-            outer_ps = _contours_to_ps_paths(edata["outer"], px_to_pt, img_h_pt)
-            inner_ps = _contours_to_ps_paths(edata["inner"], px_to_pt, img_h_pt)
+            outer_ps = _contours_to_ps_paths(
+                edata["outer"], px_to_pt, img_h_pt)
+            inner_ps = _contours_to_ps_paths(
+                edata["inner"], px_to_pt, img_h_pt)
 
             per_layer_outer.append(outer_ps)
             per_layer_inner.append(inner_ps)
@@ -292,7 +299,8 @@ class TunnelBookGenerator:
             col = layer_idx % layout_cols
             row = layer_idx // layout_cols
             cell_x0 = padding_pt + col * (cell_w + padding_pt)
-            cell_y0 = ARTBOARD_H_PT - padding_pt - (row + 1) * (cell_h + padding_pt) + padding_pt
+            cell_y0 = ARTBOARD_H_PT - padding_pt - \
+                (row + 1) * (cell_h + padding_pt) + padding_pt
             scaled_w = img_w_pt * scale_to_cell
             scaled_h = img_h_pt * scale_to_cell
             offset_x = cell_x0 + (cell_w - scaled_w) / 2.0
@@ -321,7 +329,7 @@ class TunnelBookGenerator:
 
 
 # Stroke colors
-_CUT_RGB     = (1.0, 0.0, 0.0)   # red   – outer cut
+_CUT_RGB = (1.0, 0.0, 0.0)   # red   – outer cut
 _ENGRAVE_RGB = (0.0, 0.0, 1.0)   # blue  – inner engrave
 
 
@@ -331,8 +339,8 @@ def _contours_to_ps_paths(edge_map: np.ndarray, px_to_pt: float, img_h_pt: float
     PostScript path command strings (one string per contour).
     Y is flipped to convert from image-space (y=0 top) to PS-space (y=0 bottom).
     """
-    import cv2
-    contours, _ = cv2.findContours(edge_map, cv2.RETR_LIST, cv2.CHAIN_APPROX_TC89_KCOS)
+    contours, _ = cv2.findContours(
+        edge_map, cv2.RETR_LIST, cv2.CHAIN_APPROX_TC89_KCOS)
     ps_paths = []
     for contour in contours:
         if len(contour) < 2:
@@ -344,7 +352,8 @@ def _contours_to_ps_paths(edge_map: np.ndarray, px_to_pt: float, img_h_pt: float
         for j, (px, py) in enumerate(pts):
             ps_x = px * px_to_pt
             ps_y = img_h_pt - py * px_to_pt
-            cmds.append(f"{ps_x:.4f} {ps_y:.4f} {'moveto' if j == 0 else 'lineto'}")
+            cmds.append(
+                f"{ps_x:.4f} {ps_y:.4f} {'moveto' if j == 0 else 'lineto'}")
         ps_paths.append("\n".join(cmds))
     return ps_paths
 
@@ -369,7 +378,7 @@ def _build_ai_footer() -> str:
 
 
 def _stroke_paths_block(paths: list[str], r: float, g: float, b: float,
-                         stroke_width: float) -> list[str]:
+                        stroke_width: float) -> list[str]:
     """Return PS lines that set color and stroke each path. No gsave/grestore."""
     if not paths:
         return []
@@ -386,8 +395,8 @@ def _stroke_paths_block(paths: list[str], r: float, g: float, b: float,
 
 
 def _build_layer_block(outer_paths: list[str], inner_paths: list[str],
-                        offset_x: float, offset_y: float, content_scale: float,
-                        stroke_width: float, layer_name: str = "Layer") -> str:
+                       offset_x: float, offset_y: float, content_scale: float,
+                       stroke_width: float, layer_name: str = "Layer") -> str:
     """
     PostScript block for one layer.
     Outer paths → red (cut), inner paths → blue (engrave). No fill.
@@ -405,9 +414,9 @@ def _build_layer_block(outer_paths: list[str], inner_paths: list[str],
 
 
 def _build_ai_document(artboard_w: float, artboard_h: float,
-                        outer_paths: list[str], inner_paths: list[str],
-                        offset_x: float, offset_y: float, content_scale: float,
-                        stroke_width: float, layer_name: str = "Layer") -> str:
+                       outer_paths: list[str], inner_paths: list[str],
+                       offset_x: float, offset_y: float, content_scale: float,
+                       stroke_width: float, layer_name: str = "Layer") -> str:
     """Full single-layer .ai document."""
     doc = _build_ai_header(artboard_w, artboard_h)
     doc += _build_layer_block(
@@ -421,6 +430,7 @@ def _build_ai_document(artboard_w: float, artboard_h: float,
     )
     doc += _build_ai_footer()
     return doc
+
 
 def main():
     MODEL_TYPE = "vit_h"
