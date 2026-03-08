@@ -214,11 +214,19 @@ def _vectorise_to_memory(gen: TunnelBookGenerator, edge_data, dpi: int) -> dict[
     ARTBOARD_W_PT = 32 * 72
     ARTBOARD_H_PT = 18 * 72
     STROKE_WIDTH  = 0.072
+    MAX_CONTENT_PT = 12 * 72  # 864 pt — max 12" on either axis
 
     img_h_px, img_w_px = gen.image_rgb.shape[:2]
     px_to_pt = 72.0 / dpi
     img_w_pt = img_w_px * px_to_pt
     img_h_pt = img_h_px * px_to_pt
+
+    # Per-layer: scale to 12"×12" max, centered on artboard
+    content_scale    = min(MAX_CONTENT_PT / img_w_pt, MAX_CONTENT_PT / img_h_pt, 1.0)
+    content_w_pt     = img_w_pt * content_scale
+    content_h_pt     = img_h_pt * content_scale
+    content_offset_x = (ARTBOARD_W_PT - content_w_pt) / 2.0
+    content_offset_y = (ARTBOARD_H_PT - content_h_pt) / 2.0
 
     valid_layers = [(i, e) for i, e in enumerate(edge_data) if e is not None]
 
@@ -231,7 +239,7 @@ def _vectorise_to_memory(gen: TunnelBookGenerator, edge_data, dpi: int) -> dict[
     padding_pt = 10.0
     cell_w = (ARTBOARD_W_PT - padding_pt * (layout_cols + 1)) / layout_cols
     cell_h = (ARTBOARD_H_PT - padding_pt * (layout_rows + 1)) / layout_rows
-    scale_to_cell = min(cell_w / img_w_pt, cell_h / img_h_pt)
+    scale_to_cell = min(cell_w / img_w_pt, cell_h / img_h_pt, MAX_CONTENT_PT / img_w_pt, MAX_CONTENT_PT / img_h_pt)
 
     results: dict[str, str] = {}
     per_layer_outer = []
@@ -252,9 +260,9 @@ def _vectorise_to_memory(gen: TunnelBookGenerator, edge_data, dpi: int) -> dict[
             artboard_h=ARTBOARD_H_PT,
             outer_paths=outer_ps,
             inner_paths=inner_ps,
-            offset_x=0.0,
-            offset_y=0.0,
-            content_scale=1.0,
+            offset_x=content_offset_x,
+            offset_y=content_offset_y,
+            content_scale=content_scale,
             stroke_width=STROKE_WIDTH,
             layer_name=f"Layer {orig_i + 1}",
         )

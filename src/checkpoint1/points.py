@@ -212,10 +212,22 @@ class TunnelBookGenerator:
         ARTBOARD_H_PT = 18 * 72   # 1296 pt
         STROKE_WIDTH  = 0.072     # pt
 
+        # Max content size: 12" × 12" in points
+        MAX_CONTENT_PT = 12 * 72  # 864 pt
+
         img_h_px, img_w_px = self.image_rgb.shape[:2]
         px_to_pt = 72.0 / dpi
         img_w_pt = img_w_px * px_to_pt
         img_h_pt = img_h_px * px_to_pt
+
+        # Scale to fit within 12"×12", preserving aspect ratio
+        content_scale = min(MAX_CONTENT_PT / img_w_pt, MAX_CONTENT_PT / img_h_pt, 1.0)
+        content_w_pt  = img_w_pt * content_scale
+        content_h_pt  = img_h_pt * content_scale
+
+        # Center the scaled content on the 32"×18" artboard
+        content_offset_x = (ARTBOARD_W_PT - content_w_pt) / 2.0
+        content_offset_y = (ARTBOARD_H_PT - content_h_pt) / 2.0
 
         valid_layers = [(i, e) for i, e in enumerate(edge_data) if e is not None]
 
@@ -232,7 +244,9 @@ class TunnelBookGenerator:
         padding_pt = 10.0
         cell_w = (ARTBOARD_W_PT - padding_pt * (layout_cols + 1)) / layout_cols
         cell_h = (ARTBOARD_H_PT - padding_pt * (layout_rows + 1)) / layout_rows
-        scale_to_cell = min(cell_w / img_w_pt, cell_h / img_h_pt)
+
+        # Scale to fit inside cell but also respect the 12"×12" cap
+        scale_to_cell = min(cell_w / img_w_pt, cell_h / img_h_pt, MAX_CONTENT_PT / img_w_pt, MAX_CONTENT_PT / img_h_pt)
 
         per_layer_outer = []  # ps_paths lists for combined layout
         per_layer_inner = []
@@ -255,9 +269,9 @@ class TunnelBookGenerator:
                 artboard_h=ARTBOARD_H_PT,
                 outer_paths=outer_ps,
                 inner_paths=inner_ps,
-                offset_x=0.0,
-                offset_y=0.0,
-                content_scale=1.0,
+                offset_x=content_offset_x,
+                offset_y=content_offset_y,
+                content_scale=content_scale,
                 stroke_width=STROKE_WIDTH,
                 layer_name=f"Layer {orig_i + 1}",
             )
