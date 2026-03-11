@@ -26,11 +26,9 @@ class SegmentRequest(BaseModel):
 
 
 class ExportAiRequest(BaseModel):
-    # List of masks, one per layer — each mask is a list of PNG bytes
-    # sent as base64. We receive them as raw PNG blobs via multipart instead;
-    # see the endpoint below for the actual approach (JSON list of base64 strings).
     masks_b64: list[str]          # base64-encoded PNG mask per layer, in order
     dpi: int = 72                 # source image DPI for px→pt conversion
+    mode: str = "outline"         # "outline" = red only, "engraving" = red + blue
 
 
 #  session_id -> {"gen": TunnelBookGenerator, "width": int, "height": int, ...}
@@ -187,7 +185,7 @@ async def export_ai(session_id: str, req: ExportAiRequest):
 
     # Vectorise → collect .ai file contents in memory (don't write to disk)
     try:
-        ai_files = _vectorise_to_memory(gen, edge_data, dpi=req.dpi)
+        ai_files = _vectorise_to_memory(gen, edge_data, dpi=req.dpi, mode=req.mode)
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Vectorisation failed: {e}")
@@ -209,7 +207,7 @@ async def export_ai(session_id: str, req: ExportAiRequest):
     )
 
 
-def _vectorise_to_memory(gen: TunnelBookGenerator, edge_data, dpi: int) -> dict[str, str]:
+def _vectorise_to_memory(gen: TunnelBookGenerator, edge_data, dpi: int, mode: str = "outline") -> dict[str, str]:
     """
     Returns a dict of  filename -> .ai file content (string),
     e.g. {"layer_1.ai": "...", "layer_2.ai": "...", "all_layers_layout.ai": "..."}
@@ -276,6 +274,7 @@ def _vectorise_to_memory(gen: TunnelBookGenerator, edge_data, dpi: int) -> dict[
             content_scale=content_scale,
             stroke_width=STROKE_WIDTH / content_scale,
             layer_name=f"Layer {orig_i + 1}",
+            mode=mode,
         )
         results[f"layer_{orig_i + 1}.ai"] = ai_content
 
@@ -304,6 +303,7 @@ def _vectorise_to_memory(gen: TunnelBookGenerator, edge_data, dpi: int) -> dict[
                 content_scale=scale_to_cell,
                 stroke_width=STROKE_WIDTH / scale_to_cell,
                 layer_name=f"Layer {orig_i + 1}",
+                mode=mode,
             )
         )
 

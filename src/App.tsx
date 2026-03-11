@@ -11,6 +11,7 @@ const API_BASE = (import.meta as any).env?.VITE_API_BASE ?? '' // e.g. "http://l
 const apiUrl = (path: string) => `${API_BASE}${path}`
 
 type SegmentPoint = { x: number; y: number; xPct: number; yPct: number }
+type ExportMode = 'outline' | 'engraving'
 
 async function createSession(imageFile: File) {
   const fd = new FormData()
@@ -44,7 +45,7 @@ async function deleteSession(sessionId: string) {
   await fetch(apiUrl(`/api/sessions/${sessionId}`), { method: 'DELETE' }).catch(() => { })
 }
 
-async function exportAiLayers(sessionId: string, maskBlobs: Blob[], dpi = 72) {
+async function exportAiLayers(sessionId: string, maskBlobs: Blob[], dpi = 72, mode: ExportMode = 'outline') {
   const toBase64 = (blob: Blob): Promise<string> =>
     new Promise((resolve, reject) => {
       const reader = new FileReader()
@@ -61,7 +62,7 @@ async function exportAiLayers(sessionId: string, maskBlobs: Blob[], dpi = 72) {
   const res = await fetch(apiUrl(`/api/sessions/${sessionId}/export-ai`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ masks_b64, dpi }),
+    body: JSON.stringify({ masks_b64, dpi, mode }),
   })
 
   if (!res.ok) {
@@ -182,9 +183,11 @@ interface HomeScreenProps {
   onGo: (file: File, url: string, count: number) => void
   isStarting: boolean
   error: string | null
+  exportMode: ExportMode
+  onExportModeChange: (mode: ExportMode) => void
 }
 
-function HomeScreen({ onGo, isStarting, error }: HomeScreenProps) {
+function HomeScreen({ onGo, isStarting, error, exportMode, onExportModeChange }: HomeScreenProps) {
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [layerCount, setLayerCount] = useState<string>('')
@@ -242,6 +245,23 @@ function HomeScreen({ onGo, isStarting, error }: HomeScreenProps) {
             maxLength={2}
           />
           <span className="layers-hint">max 10</span>
+        </div>
+
+        <div className="mode-pill">
+          <button
+            className={`mode-pill-btn ${exportMode === 'outline' ? 'mode-pill-btn-active' : ''}`}
+            onClick={() => onExportModeChange('outline')}
+            title="Outline — red border cuts only"
+          >
+            Outline
+          </button>
+          <button
+            className={`mode-pill-btn ${exportMode === 'engraving' ? 'mode-pill-btn-active' : ''}`}
+            onClick={() => onExportModeChange('engraving')}
+            title="Engraving — red cuts + blue engraving"
+          >
+            Engrave
+          </button>
         </div>
 
         <button
@@ -564,9 +584,10 @@ interface OutputScreenProps {
   totalLayers: number
   completedLayers: CompletedLayer[]
   onBack: () => void
+  exportMode: ExportMode
 }
 
-function OutputScreen({ imageFile, imageUrl, sessionId, sessionWidth, sessionHeight, totalLayers, completedLayers, onBack }: OutputScreenProps) {
+function OutputScreen({ imageFile, imageUrl, sessionId, sessionWidth, sessionHeight, totalLayers, completedLayers, onBack, exportMode }: OutputScreenProps) {
   // strip extension so files are named e.g. "my-photo_Layer1.png"
   const baseName = imageFile ? imageFile.name.replace(/\.[^/.]+$/, '') : 'output'
 
@@ -640,7 +661,7 @@ function OutputScreen({ imageFile, imageUrl, sessionId, sessionWidth, sessionHei
 
     try {
       const maskBlobs = completedLayers.map(l => l.maskBlob)
-      const zipBlob = await exportAiLayers(sessionId, maskBlobs)
+      const zipBlob = await exportAiLayers(sessionId, maskBlobs, 72, exportMode)
       downloadBlob(aiZipName, zipBlob)
     } catch (err: any) {
       setAiExportError(err?.message ?? 'AI export failed')
@@ -787,6 +808,7 @@ function App() {
   const [currentLayer, setCurrentLayer] = useState<number>(1)
   const [completedLayers, setCompletedLayers] = useState<CompletedLayer[]>([])
   const [showHelp, setShowHelp] = useState<boolean>(false)
+  const [exportMode, setExportMode] = useState<ExportMode>('outline')
 
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [sessionWidth, setSessionWidth] = useState<number>(0)
@@ -855,7 +877,7 @@ function App() {
         ?
       </button>
 
-      {screen === 'home' && <HomeScreen onGo={handleGo} isStarting={isStarting} error={backendError} />}
+      {screen === 'home' && <HomeScreen onGo={handleGo} isStarting={isStarting} error={backendError} exportMode={exportMode} onExportModeChange={setExportMode} />}
 
       {screen === 'layers' && imageUrl && sessionId && (
         <LayerSelectionScreen
@@ -882,6 +904,7 @@ function App() {
           totalLayers={totalLayers}
           completedLayers={completedLayers}
           onBack={handleBackToHome}
+          exportMode={exportMode}
         />
       )}
 

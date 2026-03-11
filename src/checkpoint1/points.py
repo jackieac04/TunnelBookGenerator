@@ -396,10 +396,12 @@ def _stroke_paths_block(paths: list[str], r: float, g: float, b: float,
 
 def _build_layer_block(outer_paths: list[str], inner_paths: list[str],
                        offset_x: float, offset_y: float, content_scale: float,
-                       stroke_width: float, layer_name: str = "Layer") -> str:
+                       stroke_width: float, layer_name: str = "Layer",
+                       mode: str = "outline") -> str:
     """
     PostScript block for one layer.
-    Outer paths → red (cut), inner paths → blue (engrave). No fill.
+    Outer paths → red (cut).
+    Inner paths → blue (engrave) — only included when mode == 'engraving'.
     """
     lines = [
         f"% --- {layer_name} ---",
@@ -407,8 +409,9 @@ def _build_layer_block(outer_paths: list[str], inner_paths: list[str],
         f"{offset_x:.4f} {offset_y:.4f} translate",
         f"{content_scale:.6f} {content_scale:.6f} scale",
     ]
-    lines += _stroke_paths_block(outer_paths, *_CUT_RGB,     stroke_width)
-    lines += _stroke_paths_block(inner_paths, *_ENGRAVE_RGB, stroke_width)
+    lines += _stroke_paths_block(outer_paths, *_CUT_RGB, stroke_width)
+    if mode == "engraving":
+        lines += _stroke_paths_block(inner_paths, *_ENGRAVE_RGB, stroke_width)
     lines.append("grestore")
     return "\n".join(lines) + "\n"
 
@@ -416,7 +419,8 @@ def _build_layer_block(outer_paths: list[str], inner_paths: list[str],
 def _build_ai_document(artboard_w: float, artboard_h: float,
                        outer_paths: list[str], inner_paths: list[str],
                        offset_x: float, offset_y: float, content_scale: float,
-                       stroke_width: float, layer_name: str = "Layer") -> str:
+                       stroke_width: float, layer_name: str = "Layer",
+                       mode: str = "outline") -> str:
     """Full single-layer .ai document."""
     doc = _build_ai_header(artboard_w, artboard_h)
     doc += _build_layer_block(
@@ -427,6 +431,7 @@ def _build_ai_document(artboard_w: float, artboard_h: float,
         content_scale=content_scale,
         stroke_width=stroke_width,
         layer_name=layer_name,
+        mode=mode,
     )
     doc += _build_ai_footer()
     return doc
