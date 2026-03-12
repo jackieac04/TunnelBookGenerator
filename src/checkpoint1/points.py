@@ -182,8 +182,14 @@ class TunnelBookGenerator:
                 continue
 
             # --- outer edge: silhouette of the SAM mask ---
+            # Use the mask contours directly rather than Canny so the
+            # silhouette is always a closed loop with no gaps.
             mask_uint8 = mask.astype(np.uint8) * 255
-            outer_edges = cv2.Canny(mask_uint8, 100, 200)
+            # Slight morphological close to heal any 1-px holes in the mask
+            # before tracing, then re-render to an edge map for consistency.
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+            mask_closed = cv2.morphologyEx(mask_uint8, cv2.MORPH_CLOSE, kernel)
+            outer_edges = cv2.Canny(mask_closed, 100, 200)
 
             # --- inner edges: Canny on the masked image content ---
             masked_rgb = self.image_rgb.copy()
@@ -259,8 +265,8 @@ class TunnelBookGenerator:
         print("\nExporting .ai files...")
 
         for layer_idx, (orig_i, edata) in enumerate(valid_layers):
-            outer_ps = _contours_to_ps_paths(
-                edata["outer"], px_to_pt, img_h_pt)
+            outer_ps = _mask_to_closed_ps_paths(
+                self.layer_masks[orig_i].astype(np.uint8) * 255, px_to_pt, img_h_pt)
             inner_ps = _contours_to_ps_paths(
                 edata["inner"], px_to_pt, img_h_pt)
 
@@ -333,11 +339,46 @@ _CUT_RGB = (1.0, 0.0, 0.0)   # red   – outer cut
 _ENGRAVE_RGB = (0.0, 0.0, 1.0)   # blue  – inner engrave
 
 
-def _contours_to_ps_paths(edge_map: np.ndarray, px_to_pt: float, img_h_pt: float) -> list[str]:
+
+def _smooth_contour(pts: np.ndarray, epsilon: float = 1.0, chaikin_iters: int = 2) -> np.ndarray:
+    """
+    Lightly smooth a contour:
+    1. approxPolyDP removes sub-pixel jitter (epsilon=1.0 px — very conservative).
+    2. Chaikin subdivision (2 passes) rounds sharp corners into gentle curves
+       by cutting each corner at the 1/4 and 3/4 points of every edge.
+    Both steps are intentionally small so the overall shape is barely changed.
+    """
+    # Step 1 — remove micro-jitter
+    approx = cv2.approxPolyDP(pts.reshape(-1, 1, 2).astype(np.float32),
+                               epsilon=epsilon, closed=True)
+    pts = approx.squeeze().astype(np.float64)
+    if pts.ndim == 1:
+        pts = pts[np.newaxis, :]
+
+    # Step 2 — Chaikin corner-cutting (closed curve)
+    for _ in range(chaikin_iters):
+        n = len(pts)
+        if n < 3:
+            break
+        new_pts = []
+        for i in range(n):
+            p0 = pts[i]
+            p1 = pts[(i + 1) % n]
+            new_pts.append(0.75 * p0 + 0.25 * p1)
+            new_pts.append(0.25 * p0 + 0.75 * p1)
+        pts = np.array(new_pts)
+
+    return pts
+
+
+def _contours_to_ps_paths(edge_map: np.ndarray, px_to_pt: float, img_h_pt: float,
+                          close: bool = True, min_area_px: float = 150.0) -> list[str]:
     """
     Trace contours from a single-channel edge map and return a list of
     PostScript path command strings (one string per contour).
     Y is flipped to convert from image-space (y=0 top) to PS-space (y=0 bottom).
+    Contours smaller than min_area_px (default 150 px²) are discarded.
+    A small smoothing pass is applied to each contour before conversion.
     """
     contours, _ = cv2.findContours(
         edge_map, cv2.RETR_LIST, cv2.CHAIN_APPROX_TC89_KCOS)
@@ -345,17 +386,55 @@ def _contours_to_ps_paths(edge_map: np.ndarray, px_to_pt: float, img_h_pt: float
     for contour in contours:
         if len(contour) < 2:
             continue
-        pts = contour.squeeze()
-        if pts.ndim == 1:
-            pts = pts[np.newaxis, :]
+        if cv2.contourArea(contour) < min_area_px:
+            continue
+        pts = _smooth_contour(contour.squeeze() if contour.squeeze().ndim > 1
+                              else contour.squeeze()[np.newaxis, :])
         cmds = []
         for j, (px, py) in enumerate(pts):
             ps_x = px * px_to_pt
             ps_y = img_h_pt - py * px_to_pt
             cmds.append(
                 f"{ps_x:.4f} {ps_y:.4f} {'moveto' if j == 0 else 'lineto'}")
+        if close:
+            cmds.append("closepath")
         ps_paths.append("\n".join(cmds))
     return ps_paths
+
+
+def _mask_to_closed_ps_paths(mask_uint8: np.ndarray, px_to_pt: float,
+                              img_h_pt: float, min_area_px: float = 150.0) -> list[str]:
+    """
+    Derive closed outer-silhouette paths directly from a binary mask using
+    cv2.findContours (RETR_EXTERNAL) rather than Canny edge detection.
+    This guarantees every returned path is a fully-closed loop — no gaps.
+    Contours smaller than min_area_px (default 150 px²) are discarded.
+    A small smoothing pass is applied before conversion.
+    """
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    mask_clean = cv2.morphologyEx(mask_uint8, cv2.MORPH_CLOSE, kernel)
+
+    contours, _ = cv2.findContours(
+        mask_clean, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_KCOS)
+
+    ps_paths = []
+    for contour in contours:
+        if len(contour) < 3:
+            continue
+        if cv2.contourArea(contour) < min_area_px:
+            continue
+        pts = _smooth_contour(contour.squeeze() if contour.squeeze().ndim > 1
+                              else contour.squeeze()[np.newaxis, :])
+        cmds = []
+        for j, (px, py) in enumerate(pts):
+            ps_x = px * px_to_pt
+            ps_y = img_h_pt - py * px_to_pt
+            cmds.append(
+                f"{ps_x:.4f} {ps_y:.4f} {'moveto' if j == 0 else 'lineto'}")
+        cmds.append("closepath")
+        ps_paths.append("\n".join(cmds))
+    return ps_paths
+
 
 
 def _build_ai_header(artboard_w: float, artboard_h: float) -> str:
@@ -401,7 +480,7 @@ def _build_layer_block(outer_paths: list[str], inner_paths: list[str],
     """
     PostScript block for one layer.
     Outer paths → red (cut).
-    Inner paths → blue (engrave) — only included when mode == 'engraving'.
+    Inner paths → blue (engrave) — only when mode == 'engraving'.
     """
     lines = [
         f"% --- {layer_name} ---",

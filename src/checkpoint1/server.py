@@ -213,7 +213,7 @@ def _vectorise_to_memory(gen: TunnelBookGenerator, edge_data, dpi: int, mode: st
     e.g. {"layer_1.ai": "...", "layer_2.ai": "...", "all_layers_layout.ai": "..."}
     """
     from points import (
-        _contours_to_ps_paths, _build_ai_document,
+        _contours_to_ps_paths, _mask_to_closed_ps_paths, _build_ai_document,
         _build_ai_header, _build_ai_footer, _build_layer_block,
     )
 
@@ -255,7 +255,8 @@ def _vectorise_to_memory(gen: TunnelBookGenerator, edge_data, dpi: int, mode: st
     per_layer_inner = []
 
     for layer_idx, (orig_i, edata) in enumerate(valid_layers):
-        outer_ps = _contours_to_ps_paths(edata["outer"], px_to_pt, img_h_pt)
+        outer_ps = _mask_to_closed_ps_paths(
+            gen.layer_masks[orig_i].astype(np.uint8) * 255, px_to_pt, img_h_pt)
         inner_ps = _contours_to_ps_paths(edata["inner"], px_to_pt, img_h_pt)
 
         per_layer_outer.append(outer_ps)
