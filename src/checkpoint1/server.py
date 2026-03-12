@@ -249,6 +249,8 @@ def _vectorise_to_memory(gen: TunnelBookGenerator, edge_data, dpi: int, mode: st
     cell_h = (ARTBOARD_H_PT - padding_pt * (layout_rows + 1)) / layout_rows
     scale_to_cell = min(cell_w / img_w_pt, cell_h / img_h_pt,
                         MAX_CONTENT_PT / img_w_pt, MAX_CONTENT_PT / img_h_pt)
+    cell_content_w_pt = img_w_pt * scale_to_cell
+    cell_content_h_pt = img_h_pt * scale_to_cell
 
     results: dict[str, str] = {}
     per_layer_outer = []
@@ -276,6 +278,8 @@ def _vectorise_to_memory(gen: TunnelBookGenerator, edge_data, dpi: int, mode: st
             stroke_width=STROKE_WIDTH / content_scale,
             layer_name=f"Layer {orig_i + 1}",
             mode=mode,
+            content_w_pt=content_w_pt,
+            content_h_pt=content_h_pt,
         )
         results[f"layer_{orig_i + 1}.ai"] = ai_content
 
@@ -305,6 +309,8 @@ def _vectorise_to_memory(gen: TunnelBookGenerator, edge_data, dpi: int, mode: st
                 stroke_width=STROKE_WIDTH / scale_to_cell,
                 layer_name=f"Layer {orig_i + 1}",
                 mode=mode,
+                content_w_pt=cell_content_w_pt,
+                content_h_pt=cell_content_h_pt,
             )
         )
 

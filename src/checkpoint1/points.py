@@ -473,21 +473,75 @@ def _stroke_paths_block(paths: list[str], r: float, g: float, b: float,
     return lines
 
 
+def _border_rect_ps(content_w_pt: float, content_h_pt: float,
+                    border_pt: float, stroke_width: float) -> str:
+    """
+    Draw two concentric red rectangles forming a 0.5" wide border band:
+      - inner rect: flush with the content area (0, 0) → (content_w, content_h)
+      - outer rect: border_pt (0.5") outside the content on all four sides
+    Both stroked red at stroke_width (0.072 pt).
+    Called before content scale is applied so dimensions stay in true artboard points.
+    """
+    r, g, b = _CUT_RGB
+    STROKE_WIDTH = 0.072  # always fixed, ignore passed stroke_width for border
+
+    def rect_cmds(x0, y0, w, h):
+        return [
+            "newpath",
+            f"{x0:.4f} {y0:.4f} moveto",
+            f"{x0 + w:.4f} {y0:.4f} lineto",
+            f"{x0 + w:.4f} {y0 + h:.4f} lineto",
+            f"{x0:.4f} {y0 + h:.4f} lineto",
+            "closepath",
+            "stroke",
+        ]
+
+    lines = [
+        "% --- border rects ---",
+        f"{r:.4f} {g:.4f} {b:.4f} setrgbcolor",
+        f"{STROKE_WIDTH:.4f} setlinewidth",
+        "1 setlinecap",
+        "1 setlinejoin",
+        "[] 0 setdash",
+    ]
+    # inner edge — flush with content
+    lines += rect_cmds(0, 0, content_w_pt, content_h_pt)
+    # outer edge — 0.5" beyond content
+    lines += rect_cmds(-border_pt, -border_pt,
+                       content_w_pt + 2 * border_pt,
+                       content_h_pt + 2 * border_pt)
+    return "\n".join(lines) + "\n"
+
+
 def _build_layer_block(outer_paths: list[str], inner_paths: list[str],
                        offset_x: float, offset_y: float, content_scale: float,
                        stroke_width: float, layer_name: str = "Layer",
-                       mode: str = "outline") -> str:
+                       mode: str = "outline",
+                       content_w_pt: float = 0.0,
+                       content_h_pt: float = 0.0) -> str:
     """
     PostScript block for one layer.
     Outer paths → red (cut).
     Inner paths → blue (engrave) — only when mode == 'engraving'.
+    A ½" red border rectangle is always drawn around the content area.
+    content_w_pt / content_h_pt are the unscaled artboard dimensions of the
+    content so the border rect can be placed correctly.
     """
+    BORDER_PT = 0.5 * 72  # ½ inch in points
+
     lines = [
         f"% --- {layer_name} ---",
         "gsave",
         f"{offset_x:.4f} {offset_y:.4f} translate",
-        f"{content_scale:.6f} {content_scale:.6f} scale",
     ]
+
+    # Border rect is drawn in artboard-point space (before content scale)
+    # so it is always a true ½" regardless of image scale.
+    if content_w_pt > 0 and content_h_pt > 0:
+        lines.append(_border_rect_ps(
+            content_w_pt, content_h_pt, BORDER_PT, stroke_width))
+
+    lines.append(f"{content_scale:.6f} {content_scale:.6f} scale")
     lines += _stroke_paths_block(outer_paths, *_CUT_RGB, stroke_width)
     if mode == "engraving":
         lines += _stroke_paths_block(inner_paths, *_ENGRAVE_RGB, stroke_width)
@@ -499,7 +553,9 @@ def _build_ai_document(artboard_w: float, artboard_h: float,
                        outer_paths: list[str], inner_paths: list[str],
                        offset_x: float, offset_y: float, content_scale: float,
                        stroke_width: float, layer_name: str = "Layer",
-                       mode: str = "outline") -> str:
+                       mode: str = "outline",
+                       content_w_pt: float = 0.0,
+                       content_h_pt: float = 0.0) -> str:
     """Full single-layer .ai document."""
     doc = _build_ai_header(artboard_w, artboard_h)
     doc += _build_layer_block(
@@ -511,6 +567,8 @@ def _build_ai_document(artboard_w: float, artboard_h: float,
         stroke_width=stroke_width,
         layer_name=layer_name,
         mode=mode,
+        content_w_pt=content_w_pt,
+        content_h_pt=content_h_pt,
     )
     doc += _build_ai_footer()
     return doc
