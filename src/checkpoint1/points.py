@@ -40,11 +40,12 @@ class TunnelBookGenerator:
             return
 
         if event.xdata is not None and event.ydata is not None:
-            x, y = int(event.xdata), int(event.ydata)
-            self.layer_clicks[self.current_layer].append([x, y])
+            x, y = int(round(event.xdata)), int(round(event.ydata))
+            if 0 <= x < self.image_rgb.shape[1] and 0 <= y < self.image_rgb.shape[0]:
+                self.layer_clicks[self.current_layer].append([x, y])
 
-            self.generate_mask_for_current_layer()
-            self.update_display()
+                self.generate_mask_for_current_layer()
+                self.update_display()
 
     # next layer or close if finished
     def next_layer(self, event):
@@ -113,6 +114,7 @@ class TunnelBookGenerator:
 
         display_img = display_img.astype(np.uint8)
         self.ax.imshow(display_img)
+        self.ax.set_aspect('equal')
 
         #  click points for cur layer
         clicks = self.layer_clicks[self.current_layer]
@@ -137,7 +139,7 @@ class TunnelBookGenerator:
         self.layer_clicks = [[] for _ in range(num_layers)]
         self.layer_masks = [None for _ in range(num_layers)]
 
-        self.fig, self.ax = plt.subplots(figsize=(12, 8))
+        self.fig, self.ax = plt.subplots(figsize=(10, 8))
         plt.subplots_adjust(bottom=0.2)
 
         axnext = plt.axes([0.81, 0.05, 0.1, 0.075])

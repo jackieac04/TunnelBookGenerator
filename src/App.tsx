@@ -1,122 +1,499 @@
-import { useState, useRef, useEffect, type ChangeEvent } from "react";
 import {
-  Upload,
-  ChevronLeft,
-  ChevronRight,
-  CheckCircle2,
-  ImagePlus,
-  Paintbrush2,
-  Download,
-  DownloadCloud,
-  Sparkles,
-  Layers,
-  ArrowRight,
-  Check,
-} from "lucide-react"; // npm install lucide-react
-import JSZip from "jszip"; // npm install jszip
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  type ChangeEvent,
+} from "react";
+import JSZip from "jszip";
 import "./App.css";
 
-const API_BASE = (import.meta as any).env?.VITE_API_BASE ?? ""; // e.g. "http://localhost:8000" (optional)
+const API_BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
 const apiUrl = (path: string) => `${API_BASE}${path}`;
 
 type SegmentPoint = { x: number; y: number; xPct: number; yPct: number };
 type ExportMode = "outline" | "engraving";
 type Mode = "manual" | "automatic";
 
+const I = {
+  Upload: ({ size = 15 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="16 16 12 12 8 16" />
+      <line x1="12" y1="12" x2="12" y2="21" />
+      <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3" />
+    </svg>
+  ),
+  ChevronLeft: ({ size = 14 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="15 18 9 12 15 6" />
+    </svg>
+  ),
+  ChevronRight: ({ size = 14 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="9 18 15 12 9 6" />
+    </svg>
+  ),
+  ChevronDown: ({ size = 12 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  ),
+  ChevronUp: ({ size = 12 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="18 15 12 9 6 15" />
+    </svg>
+  ),
+  Check: ({ size = 11 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  ),
+  CheckCircle: ({ size = 17 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+      <polyline points="22 4 12 14.01 9 11.01" />
+    </svg>
+  ),
+  ImagePlus: ({ size = 38 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+      <circle cx="8.5" cy="8.5" r="1.5" />
+      <polyline points="21 15 16 10 5 21" />
+      <line x1="16" y1="5" x2="22" y2="5" />
+      <line x1="19" y1="2" x2="19" y2="8" />
+    </svg>
+  ),
+  Brush: ({ size = 13 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M18.37 2.63 14 7l-1.59-1.59a2 2 0 0 0-2.82 0L8 7l9 9 1.59-1.59a2 2 0 0 0 0-2.82L17 10l4.37-4.37a2.12 2.12 0 1 0-3-3Z" />
+      <path d="M9 8c-2 3-4 3.5-7 4l8 8c1-.5 3.5-2 4-7" />
+    </svg>
+  ),
+  Download: ({ size = 14 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  ),
+  DownloadCloud: ({ size = 16 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="8 17 12 21 16 17" />
+      <line x1="12" y1="12" x2="12" y2="21" />
+      <path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29" />
+    </svg>
+  ),
+  Sparkles: ({ size = 16 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+    </svg>
+  ),
+  Layers: ({ size = 14 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polygon points="12 2 2 7 12 12 22 7 12 2" />
+      <polyline points="2 17 12 22 22 17" />
+      <polyline points="2 12 12 17 22 12" />
+    </svg>
+  ),
+  ArrowRight: ({ size = 15 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <line x1="5" y1="12" x2="19" y2="12" />
+      <polyline points="12 5 19 12 12 19" />
+    </svg>
+  ),
+  BookOpen: ({ size = 14 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+    </svg>
+  ),
+  Settings: ({ size = 13 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  ),
+  X: ({ size = 12 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  ),
+  RotateCcw: ({ size = 12 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="1 4 1 10 7 10" />
+      <path d="M3.51 15a9 9 0 1 0 .49-4.15" />
+    </svg>
+  ),
+  RotateCw: ({ size = 12 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="23 4 23 10 17 10" />
+      <path d="M20.49 15a9 9 0 1 1-.49-4.15" />
+    </svg>
+  ),
+  Expand: ({ size = 11 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="15 3 21 3 21 9" />
+      <polyline points="9 21 3 21 3 15" />
+      <line x1="21" y1="3" x2="14" y2="10" />
+      <line x1="3" y1="21" x2="10" y2="14" />
+    </svg>
+  ),
+  Collapse: ({ size = 11 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="4 14 10 14 10 20" />
+      <polyline points="20 10 14 10 14 4" />
+      <line x1="10" y1="14" x2="3" y2="21" />
+      <line x1="21" y1="3" x2="14" y2="10" />
+    </svg>
+  ),
+  Scissors: ({ size = 12 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="6" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <line x1="20" y1="4" x2="8.12" y2="15.88" />
+      <line x1="14.47" y1="14.48" x2="20" y2="20" />
+      <line x1="8.12" y1="8.12" x2="12" y2="12" />
+    </svg>
+  ),
+  Eye: ({ size = 13 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  ),
+  EyeOff: ({ size = 13 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+      <line x1="1" y1="1" x2="23" y2="23" />
+    </svg>
+  ),
+  SquareStack: ({ size = 18 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4 10c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h4c1.1 0 2 .9 2 2" />
+      <path d="M10 16c-1.1 0-2-.9-2-2v-4c0-1.1.9-2 2-2h4c1.1 0 2 .9 2 2" />
+      <rect x="14" y="14" width="8" height="8" rx="2" />
+    </svg>
+  ),
+  Home: ({ size = 13 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+      <polyline points="9 22 9 12 15 12 15 22" />
+    </svg>
+  ),
+  Wand: ({ size = 13 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M15 4V2" />
+      <path d="M15 16v-2" />
+      <path d="M8 9h2" />
+      <path d="M20 9h2" />
+      <path d="M17.8 11.8 19 13" />
+      <path d="M15 9h.01" />
+      <path d="M17.8 6.2 19 5" />
+      <path d="m3 21 9-9" />
+      <path d="M12.2 6.2 11 5" />
+    </svg>
+  ),
+  DragHandle: ({ size = 12 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="9" cy="5" r="1" fill="currentColor" stroke="none" />
+      <circle cx="9" cy="12" r="1" fill="currentColor" stroke="none" />
+      <circle cx="9" cy="19" r="1" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="5" r="1" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="12" r="1" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="19" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+};
+
 async function createSession(imageFile: File) {
   const fd = new FormData();
   fd.append("image", imageFile);
-
   const res = await fetch(apiUrl("/api/sessions"), {
     method: "POST",
     body: fd,
   });
-  if (!res.ok) {
-    const msg = await res.text().catch(() => "");
-    throw new Error(msg || `Failed to start automatic session (${res.status})`);
-  }
+  if (!res.ok)
+    throw new Error(
+      (await res.text().catch(() => "")) ||
+        `Failed to start session (${res.status})`,
+    );
   return res.json() as Promise<{
     sessionId: string;
     width: number;
     height: number;
   }>;
 }
+
 async function createAutomaticSession(imageFile: File) {
   const fd = new FormData();
   fd.append("image", imageFile);
-
   const res = await fetch(apiUrl("/api/automatic-sessions"), {
     method: "POST",
     body: fd,
   });
-  if (!res.ok) {
-    const msg = await res.text().catch(() => "");
-    throw new Error(msg || `Failed to start automatic session (${res.status})`);
-  }
+  if (!res.ok)
+    throw new Error(
+      (await res.text().catch(() => "")) ||
+        `Failed to start session (${res.status})`,
+    );
   return res.json() as Promise<{
     sessionId: string;
     width: number;
     height: number;
   }>;
-}
-
-async function segmentMask(
-  sessionId: string,
-  points: SegmentPoint[],
-  signal?: AbortSignal,
-) {
-  const res = await fetch(apiUrl(`/api/sessions/${sessionId}/segment`), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ points: points.map((p) => [p.x, p.y]) }),
-    signal,
-  });
-
-  if (!res.ok) {
-    const msg = await res.text().catch(() => "");
-    throw new Error(msg || `Segmentation failed (${res.status})`);
-  }
-
-  return res.blob();
-}
-
-async function deleteSession(sessionId: string) {
-  await fetch(apiUrl(`/api/sessions/${sessionId}`), { method: "DELETE" }).catch(
-    () => {},
-  );
-}
-
-async function exportAiLayers(
-  sessionId: string,
-  maskBlobs: Blob[],
-  dpi = 72,
-  mode: ExportMode = "outline",
-) {
-  const toBase64 = (blob: Blob): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result as string;
-        resolve(result.split(",")[1]); // strip "data:...;base64,"
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-
-  const masks_b64 = await Promise.all(maskBlobs.map(toBase64));
-
-  const res = await fetch(apiUrl(`/api/sessions/${sessionId}/export-ai`), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ masks_b64, dpi, mode }),
-  });
-
-  if (!res.ok) {
-    const msg = await res.text().catch(() => "");
-    throw new Error(msg || `AI export failed (${res.status})`);
-  }
-
-  return res.blob(); // zip blob
 }
 
 async function automaticLayers(
@@ -150,74 +527,144 @@ async function automaticAiLayers(sessionId: string) {
   return res.blob(); // ai zip blob
 }
 
+async function segmentMask(
+  sessionId: string,
+  points: SegmentPoint[],
+  signal?: AbortSignal,
+) {
+  const res = await fetch(apiUrl(`/api/sessions/${sessionId}/segment`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ points: points.map((p) => [p.x, p.y]) }),
+    signal,
+  });
+  if (!res.ok)
+    throw new Error(
+      (await res.text().catch(() => "")) ||
+        `Segmentation failed (${res.status})`,
+    );
+  return res.blob();
+}
+
+async function deleteSession(sessionId: string) {
+  await fetch(apiUrl(`/api/sessions/${sessionId}`), { method: "DELETE" }).catch(
+    () => {},
+  );
+}
+
+async function exportAiLayers(
+  sessionId: string,
+  maskBlobs: Blob[],
+  dpi = 72,
+  mode: ExportMode = "outline",
+) {
+  const toBase64 = (blob: Blob): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve((reader.result as string).split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  const masks_b64 = await Promise.all(maskBlobs.map(toBase64));
+  const res = await fetch(apiUrl(`/api/sessions/${sessionId}/export-ai`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ masks_b64, dpi, mode }),
+  });
+  if (!res.ok)
+    throw new Error(
+      (await res.text().catch(() => "")) || `AI export failed (${res.status})`,
+    );
+  return res.blob();
+}
+
+async function exportAiLayersPerMode(
+  sessionId: string,
+  layers: Array<{ maskBlob: Blob; mode: ExportMode; index: number }>,
+  dpi = 72,
+): Promise<Blob> {
+  const toBase64 = (blob: Blob): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve((reader.result as string).split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+
+  const zip = new JSZip();
+
+  for (const layer of layers) {
+    const b64 = await toBase64(layer.maskBlob);
+    const res = await fetch(apiUrl(`/api/sessions/${sessionId}/export-ai`), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ masks_b64: [b64], dpi, mode: layer.mode }),
+    });
+
+    if (!res.ok)
+      throw new Error(
+        (await res.text().catch(() => "")) ||
+          `AI export failed for layer ${layer.index + 1}`,
+      );
+    const zipBlob = await res.blob();
+    const innerZip = await JSZip.loadAsync(zipBlob);
+    for (const [filename, file] of Object.entries(innerZip.files)) {
+      if (!file.dir) {
+        const content = await file.async("blob");
+        const newName = filename
+          .replace(
+            /layer_1\.ai/,
+            `layer_${String(layer.index + 1).padStart(2, "0")}_${layer.mode}.ai`,
+          )
+          .replace(
+            /all_layers_layout\.ai/,
+            `layer_${String(layer.index + 1).padStart(2, "0")}_${layer.mode}_layout.ai`,
+          );
+        zip.file(newName, content);
+      }
+    }
+  }
+
+  return zip.generateAsync({ type: "blob" });
+}
+
 interface LayerColor {
   fill: string;
   stroke: string;
+  solid: string;
 }
-
 interface CompletedLayer {
   maskUrl: string;
   maskBlob: Blob;
   points: SegmentPoint[];
   color: LayerColor;
+  mode: ExportMode;
 }
 
-// each layer gets the next colour — used to tint the mask overlay
 const LAYER_COLORS: LayerColor[] = [
-  { fill: "rgba(239, 68, 68, 0.55)", stroke: "#ef4444" },
-  { fill: "rgba(59, 130, 246, 0.55)", stroke: "#3b82f6" },
-  { fill: "rgba(34, 197, 94, 0.55)", stroke: "#22c55e" },
-  { fill: "rgba(251, 146, 60, 0.55)", stroke: "#f97316" },
-  { fill: "rgba(168, 85, 247, 0.55)", stroke: "#a855f7" },
-  { fill: "rgba(236, 72, 153, 0.55)", stroke: "#ec4899" },
-  { fill: "rgba(20, 184, 166, 0.55)", stroke: "#14b8a6" },
-  { fill: "rgba(234, 179, 8, 0.55)", stroke: "#eab308" },
-  { fill: "rgba(99, 102, 241, 0.55)", stroke: "#6366f1" },
-  { fill: "rgba(14, 165, 233, 0.55)", stroke: "#0ea5e9" },
+  { fill: "rgba(239,68,68,0.55)", stroke: "#ef4444", solid: "#ef4444" },
+  { fill: "rgba(59,130,246,0.55)", stroke: "#3b82f6", solid: "#3b82f6" },
+  { fill: "rgba(34,197,94,0.55)", stroke: "#22c55e", solid: "#22c55e" },
+  { fill: "rgba(251,146,60,0.55)", stroke: "#f97316", solid: "#f97316" },
+  { fill: "rgba(168,85,247,0.55)", stroke: "#a855f7", solid: "#a855f7" },
+  { fill: "rgba(236,72,153,0.55)", stroke: "#ec4899", solid: "#ec4899" },
+  { fill: "rgba(20,184,166,0.55)", stroke: "#14b8a6", solid: "#14b8a6" },
+  { fill: "rgba(234,179,8,0.55)", stroke: "#eab308", solid: "#eab308" },
+  { fill: "rgba(99,102,241,0.55)", stroke: "#6366f1", solid: "#6366f1" },
+  { fill: "rgba(14,165,233,0.55)", stroke: "#0ea5e9", solid: "#0ea5e9" },
 ];
 
-// decorative bubbles floating in the background
-function Bubbles() {
+function Stars() {
   return (
-    <div className="bubbles" aria-hidden="true">
-      {[...Array(8)].map((_, i) => (
-        <div key={i} className={`bubble bubble-${i + 1}`} />
+    <div className="stars" aria-hidden="true">
+      {[...Array(20)].map((_, i) => (
+        <div key={i} className={`star star-${i + 1}`} />
       ))}
     </div>
   );
 }
 
-// progress dots shown on the layer selection screen
-function ProgressDots({ total, current }: { total: number; current: number }) {
-  return (
-    <div className="progress-dots">
-      {Array.from({ length: total }, (_, i) => (
-        <div
-          key={i}
-          className={`progress-dot ${
-            i + 1 < current
-              ? "dot-done"
-              : i + 1 === current
-                ? "dot-active"
-                : "dot-pending"
-          }`}
-          style={
-            i + 1 === current
-              ? { background: LAYER_COLORS[i % LAYER_COLORS.length].stroke }
-              : {}
-          }
-        />
-      ))}
-    </div>
-  );
-}
-
-// help modal — triggered by the ? button in the corner
-interface HelpModalProps {
-  onClose: () => void;
-}
-
-function HelpModal({ onClose }: HelpModalProps) {
+function HelpModal({ onClose }: { onClose: () => void }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
@@ -225,41 +672,48 @@ function HelpModal({ onClose }: HelpModalProps) {
           x
         </button>
         <div className="modal-title">
-          <Sparkles size={18} className="modal-title-icon" />
-          How It Works
+          <I.Sparkles /> How It Works
         </div>
-
         <div className="modal-step">
           <div className="modal-step-label">
-            <Upload size={13} /> Step 1 — Upload Photo
+            <I.Upload /> step 1 — Upload
           </div>
           <p>
-            Upload a photo and enter the number of layers (1–10). Click{" "}
-            <strong>Go!</strong> to begin.
+            Drop or click to upload a photo. Enter how many layers (1–10) and
+            press <strong>run</strong>.
           </p>
         </div>
         <hr className="modal-divider" />
         <div className="modal-step">
           <div className="modal-step-label">
-            <Paintbrush2 size={13} /> Step 2 — Select Your Layers
+            <I.Brush /> step 2 — Select Layers
           </div>
           <p>
-            Click <strong>multiple points</strong> on the image to guide the
-            selection for each layer. Each click adds a selection on the layer
-            (more points usually means a cleaner mask). When it looks right,
-            click <strong>Next Layer</strong> to lock it in! Completed layers
-            cannot be revised. The last layer shows{" "}
-            <strong>Submit Layers</strong>.
+            Click points on the image to guide each layer. Each click refines
+            the AI mask. On the <strong>last layer</strong>, use{" "}
+            <strong>Select Remaining</strong> to auto-fill everything not yet
+            selected.
           </p>
         </div>
         <hr className="modal-divider" />
         <div className="modal-step">
           <div className="modal-step-label">
-            <Download size={13} /> Step 3 — Download &amp; Cut
+            <I.BookOpen /> step 3 — Visualize
           </div>
           <p>
-            <strong>Download All</strong> exports in a single <code>.zip</code>{" "}
-            containing every layer image or individually.
+            The book preview shows layers as solid colours. Toggle visibility
+            with the eye icon, click any layer row to expand its settings
+            (outline vs engrave).
+          </p>
+        </div>
+        <hr className="modal-divider" />
+        <div className="modal-step">
+          <div className="modal-step-label">
+            <I.Download /> step 4 — Export
+          </div>
+          <p>
+            <strong>Download All</strong> exports a <code>.zip</code>.{" "}
+            <strong>Export .ai</strong> gives Adobe Illustrator files per layer.
           </p>
         </div>
       </div>
@@ -267,62 +721,572 @@ function HelpModal({ onClose }: HelpModalProps) {
   );
 }
 
-// home screen — image upload + layer count input
-interface HomeScreenProps {
-  onGo: (file: File, url: string, count: number, mode: Mode) => void;
-  isStarting: boolean;
-  error: string | null;
-  exportMode: ExportMode;
-  onExportModeChange: (mode: ExportMode) => void;
-  mode: Mode;
-  onModeChange: (mode: Mode) => void;
+type Screen = "home" | "layers" | "output";
+
+function Sidebar({
+  screen,
+  totalLayers,
+  currentLayer,
+  completedCount,
+  onGoHome,
+}: {
+  screen: Screen;
+  totalLayers: number;
+  currentLayer: number;
+  completedCount: number;
+  onGoHome: () => void;
+}) {
+  return (
+    <aside className="sidebar">
+      <div className="sidebar-logo">
+        <I.SquareStack />
+        <span>
+          tunnel<span className="sidebar-logo-accent">book</span>
+        </span>
+      </div>
+      <nav className="sidebar-nav">
+        <div
+          className={`sidebar-tab ${screen === "home" ? "sidebar-tab--active" : "sidebar-tab--idle"}`}
+          onClick={onGoHome}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => e.key === "Enter" && onGoHome()}
+        >
+          <I.Home />
+          <span className="sidebar-tab-label">upload</span>
+          {screen !== "home" && (
+            <div
+              className="sidebar-tab-dot"
+              style={{ background: "#6366f1" }}
+            />
+          )}
+        </div>
+
+        {totalLayers > 0 &&
+          Array.from({ length: totalLayers }, (_, i) => {
+            const n = i + 1,
+              isDone = i < completedCount;
+            const isActive = screen === "layers" && currentLayer === n;
+            const c = LAYER_COLORS[i % LAYER_COLORS.length];
+            return (
+              <div
+                key={i}
+                className={`sidebar-tab ${isActive ? "sidebar-tab--active" : ""} ${isDone ? "sidebar-tab--done" : ""} ${!isDone && !isActive ? "sidebar-tab--pending" : ""}`}
+                style={isActive ? { borderLeftColor: c.stroke } : {}}
+              >
+                <div
+                  className="sidebar-tab-dot"
+                  style={{
+                    background:
+                      isDone || isActive ? c.solid : "rgba(200,170,255,0.18)",
+                  }}
+                />
+                <span className="sidebar-tab-label">
+                  layer_{n.toString().padStart(2, "0")}
+                </span>
+                {isDone && (
+                  <span className="sidebar-tab-check">
+                    <I.Check />
+                  </span>
+                )}
+                {isActive && <div className="sidebar-tab-pulse" />}
+              </div>
+            );
+          })}
+
+        {screen === "output" && (
+          <div className="sidebar-tab sidebar-tab--active sidebar-tab--output">
+            <I.CheckCircle size={13} />
+            <span className="sidebar-tab-label">output</span>
+          </div>
+        )}
+      </nav>
+      <div className="sidebar-footer">
+        <span className="sidebar-status">
+          {totalLayers > 0 ? (
+            <>
+              {completedCount}
+              <span className="sidebar-status-sep">/</span>
+              {totalLayers} done
+            </>
+          ) : (
+            "ready"
+          )}
+        </span>
+      </div>
+    </aside>
+  );
+}
+
+function BookVisualizer({
+  completedLayers,
+  totalLayers,
+  layerModes,
+  onLayerModeChange,
+  inProgressMask,
+  onDockedChange,
+  onDragStart,
+  locked,
+}: {
+  completedLayers: CompletedLayer[];
+  totalLayers: number;
+  layerModes: ExportMode[];
+  onLayerModeChange: (i: number, m: ExportMode) => void;
+  inProgressMask: { maskUrl: string; color: LayerColor } | null;
+  onDockedChange: (docked: boolean) => void;
+  onDragStart: (
+    startX: number,
+    startY: number,
+    panelX: number,
+    panelY: number,
+  ) => void;
+  locked?: boolean;
+}) {
+  const [rotY, setRotY] = useState(30);
+  const [rotX, setRotX] = useState(14);
+  const [scale, setScale] = useState(1);
+  const [minimized, setMinimized] = useState(false);
+  const [docked, setDocked] = useState(true);
+  const [expandedLayer, setExpandedLayer] = useState<number | null>(null);
+  const [visibleLayers, setVisibleLayers] = useState<Set<number>>(new Set());
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStart = useRef<{
+    x: number;
+    y: number;
+    ry: number;
+    rx: number;
+  } | null>(null);
+
+  useEffect(() => {
+    setVisibleLayers((prev) => {
+      const s = new Set(prev);
+      completedLayers.forEach((_, i) => s.add(i));
+      return s;
+    });
+  }, [completedLayers.length]);
+
+  const toggleVis = (idx: number) =>
+    setVisibleLayers((prev) => {
+      const s = new Set(prev);
+      s.has(idx) ? s.delete(idx) : s.add(idx);
+      return s;
+    });
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    dragStart.current = { x: e.clientX, y: e.clientY, ry: rotY, rx: rotX };
+    setIsDragging(true);
+    e.preventDefault();
+  };
+
+  useEffect(() => {
+    if (!isDragging) return;
+    const move = (e: MouseEvent) => {
+      if (!dragStart.current) return;
+      setRotY(dragStart.current.ry + (e.clientX - dragStart.current.x) * 0.55);
+      setRotX(dragStart.current.rx - (e.clientY - dragStart.current.y) * 0.32);
+    };
+    const up = () => setIsDragging(false);
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    return () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+  }, [isDragging]);
+
+  const sceneRef = useCallback((el: HTMLDivElement | null) => {
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      setScale((s) => Math.min(3, Math.max(0.3, s - e.deltaY * 0.001)));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    (el as any)._wheelCleanup = () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  const hasContent = completedLayers.length > 0 || !!inProgressMask;
+
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  return (
+    <div
+      ref={panelRef}
+      className={`viz-panel ${docked ? "viz-panel--docked" : ""} ${minimized ? "viz-panel--minimized" : ""}`}
+    >
+      <div className="viz-header">
+        {!docked && (
+          <div
+            className="viz-drag-handle"
+            title="Drag to move"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              const panel = panelRef.current?.closest(
+                ".viz-float",
+              ) as HTMLElement | null;
+              if (!panel) return;
+              const rect = panel.getBoundingClientRect();
+              onDragStart(e.clientX, e.clientY, rect.left, rect.top);
+            }}
+          >
+            <I.DragHandle />
+          </div>
+        )}
+        <I.BookOpen />
+        <span>book_preview</span>
+        {locked && <span className="viz-locked-badge">locked</span>}
+        <div className="viz-header-actions">
+          <button
+            className="viz-icon-btn"
+            onClick={() => {
+              setRotY(30);
+              setRotX(14);
+              setScale(1);
+            }}
+            title="Reset view"
+          >
+            <I.RotateCcw />
+          </button>
+          <button
+            className="viz-icon-btn"
+            onClick={() => {
+              const next = !docked;
+              setDocked(next);
+              onDockedChange(next);
+              setMinimized(false);
+            }}
+            title={docked ? "Float" : "Expand to panel"}
+          >
+            {docked ? <I.Collapse /> : <I.Expand />}
+          </button>
+          {!docked && (
+            <button
+              className="viz-icon-btn"
+              onClick={() => setMinimized((m) => !m)}
+              title={minimized ? "Show" : "Minimize"}
+            >
+              {minimized ? <I.ChevronUp /> : <I.ChevronDown />}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {!minimized && (
+        <>
+          {!hasContent ? (
+            <div className="viz-empty">
+              <I.Layers size={26} />
+              <span>
+                click points on
+                <br />
+                the image to preview
+              </span>
+            </div>
+          ) : (
+            <>
+              <div
+                ref={sceneRef}
+                className="viz-scene"
+                onMouseDown={handleMouseDown}
+                style={{ cursor: isDragging ? "grabbing" : "grab" }}
+              >
+                <div
+                  className="viz-book"
+                  style={{
+                    transform: `scale(${scale}) rotateX(${rotX}deg) rotateY(${rotY}deg)`,
+                  }}
+                >
+                  {completedLayers.map((layer, i) => {
+                    if (!visibleLayers.has(i)) return null;
+                    return (
+                      <div
+                        key={i}
+                        className="viz-layer"
+                        style={{
+                          background: layer.color.solid,
+                          WebkitMaskImage: `url(${layer.maskUrl})`,
+                          maskImage: `url(${layer.maskUrl})`,
+                          transform: `translateZ(${(completedLayers.length - i) * 20}px)`,
+                          zIndex: completedLayers.length - i,
+                        }}
+                      />
+                    );
+                  })}
+                  {inProgressMask && (
+                    <div
+                      className="viz-layer viz-layer--inprogress"
+                      style={{
+                        background: inProgressMask.color.solid,
+                        WebkitMaskImage: `url(${inProgressMask.maskUrl})`,
+                        maskImage: `url(${inProgressMask.maskUrl})`,
+                        transform: `translateZ(${(completedLayers.length + 1) * 20}px)`,
+                        zIndex: completedLayers.length + 1,
+                      }}
+                    />
+                  )}
+                </div>
+                <div className="viz-scene-hint">
+                  scroll to zoom · drag to rotate
+                </div>
+              </div>
+              <div className="viz-rotate-row">
+                <button
+                  className="viz-ctrl-btn"
+                  onClick={() => setRotY((r) => r - 30)}
+                  title="Rotate left"
+                >
+                  <I.RotateCcw />
+                </button>
+                <div className="viz-zoom-controls">
+                  <button
+                    className="viz-ctrl-btn"
+                    onClick={() => setScale((s) => Math.max(0.3, s - 0.15))}
+                    title="Zoom out"
+                  >
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                    >
+                      <line x1="5" y1="12" x2="19" y2="12" />
+                    </svg>
+                  </button>
+                  <span className="viz-ctrl-label">
+                    {Math.round(scale * 100)}%
+                  </span>
+                  <button
+                    className="viz-ctrl-btn"
+                    onClick={() => setScale((s) => Math.min(3, s + 0.15))}
+                    title="Zoom in"
+                  >
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                    >
+                      <line x1="12" y1="5" x2="12" y2="19" />
+                      <line x1="5" y1="12" x2="19" y2="12" />
+                    </svg>
+                  </button>
+                </div>
+                <span className="viz-ctrl-label-layers">
+                  {completedLayers.length}/{totalLayers}
+                  {inProgressMask && (
+                    <span className="viz-live-badge"> ● live</span>
+                  )}
+                </span>
+                <button
+                  className="viz-ctrl-btn"
+                  onClick={() => setRotY((r) => r + 30)}
+                  title="Rotate right"
+                >
+                  <I.RotateCw />
+                </button>
+              </div>
+              <div className="viz-layer-list">
+                {completedLayers.map((layer, i) => {
+                  const isExpanded = expandedLayer === i;
+                  const isVisible = visibleLayers.has(i);
+                  const mode = layerModes[i] ?? "outline";
+                  return (
+                    <div
+                      key={i}
+                      className={`viz-layer-row ${isExpanded ? "viz-layer-row--expanded" : ""}`}
+                    >
+                      <div
+                        className={`viz-layer-row-header ${locked ? "viz-layer-row-header--locked" : ""}`}
+                        onClick={() =>
+                          !locked && setExpandedLayer(isExpanded ? null : i)
+                        }
+                        role={locked ? undefined : "button"}
+                        title={
+                          locked
+                            ? "Locked after export"
+                            : "Click to configure export settings"
+                        }
+                      >
+                        <div
+                          className="viz-layer-swatch"
+                          style={{ background: layer.color.solid }}
+                        />
+                        <span className="viz-layer-name">
+                          layer_{(i + 1).toString().padStart(2, "0")}
+                        </span>
+                        <span className="viz-layer-mode-badge">{mode}</span>
+                        <button
+                          className={`viz-eye-btn ${!isVisible ? "viz-eye-btn--off" : ""}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleVis(i);
+                          }}
+                          title={isVisible ? "Hide" : "Show"}
+                        >
+                          {isVisible ? <I.Eye /> : <I.EyeOff />}
+                        </button>
+                        {locked ? (
+                          <span
+                            className="viz-locked-icon"
+                            title="Settings locked after export"
+                          >
+                            🔒
+                          </span>
+                        ) : (
+                          <span className="viz-expand-arrow">
+                            {isExpanded ? <I.ChevronUp /> : <I.ChevronDown />}
+                          </span>
+                        )}
+                      </div>
+                      {!locked && isExpanded && (
+                        <div className="viz-layer-options">
+                          <div className="viz-options-label">
+                            // export_mode
+                          </div>
+                          <div className="viz-modes">
+                            <button
+                              className={`viz-mode-btn ${mode === "outline" ? "viz-mode-btn--active" : ""}`}
+                              onClick={() => onLayerModeChange(i, "outline")}
+                            >
+                              <I.Scissors /> outline
+                            </button>
+                            <button
+                              className={`viz-mode-btn ${mode === "engraving" ? "viz-mode-btn--active" : ""}`}
+                              onClick={() => onLayerModeChange(i, "engraving")}
+                            >
+                              <I.Eye /> engrave
+                            </button>
+                          </div>
+                          <div className="viz-mode-hint">
+                            {mode === "outline"
+                              ? "// red cut lines only"
+                              : "// red cuts + blue engraving"}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {inProgressMask && (
+                  <div className="viz-layer-row viz-layer-row--inprogress">
+                    <div
+                      className="viz-layer-row-header"
+                      style={{ cursor: "default" }}
+                    >
+                      <div
+                        className="viz-layer-swatch viz-layer-swatch--pulse"
+                        style={{ background: inProgressMask.color.solid }}
+                      />
+                      <span className="viz-layer-name">
+                        layer_
+                        {(completedLayers.length + 1)
+                          .toString()
+                          .padStart(2, "0")}
+                      </span>
+                      <span className="viz-live-badge">● selecting…</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
 }
 
 function HomeScreen({
   onGo,
   isStarting,
+  startingStatus,
   error,
   exportMode,
   onExportModeChange,
   mode,
   onModeChange,
-}: HomeScreenProps) {
+}: {
+  onGo: (f: File, url: string, n: number, mode: Mode) => void;
+  isStarting: boolean;
+  startingStatus: string | null;
+  error: string | null;
+  exportMode: ExportMode;
+  onExportModeChange: (m: ExportMode) => void;
+  mode: Mode;
+  onModeChange: (m: Mode) => void;
+}) {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [layerCount, setLayerCount] = useState<string>("");
+  const [layerCount, setLayerCount] = useState("");
+  const [isDragging, setIsDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const parsedLayers = parseInt(layerCount, 10);
-  const canGo =
-    imageUrl !== null && parsedLayers >= 1 && parsedLayers <= 10 && !isStarting;
+  const parsed = parseInt(layerCount, 10);
+  const canGo = !!imageUrl && parsed >= 1 && parsed <= 10 && !isStarting;
 
-  // image upload — stores as local object URL for preview
-  const handleFile = (e: ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
+  const applyFile = (f: File) => {
     setImageFile(f);
     setImageUrl(URL.createObjectURL(f));
   };
-
-  const handleLayerInput = (e: ChangeEvent<HTMLInputElement>) => {
-    const v = e.target.value.replace(/[^0-9]/g, "");
-    if (v === "" || parseInt(v) <= 10) setLayerCount(v);
-    else setLayerCount("10");
+  const handleFile = (e: ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) applyFile(f);
   };
-
-  const handleGo = () => {
-    if (canGo && imageFile && imageUrl)
-      onGo(imageFile, imageUrl, parsedLayers, mode);
+  const onDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+  const onDragLeave = (e: React.DragEvent) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node))
+      setIsDragging(false);
+  };
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const f = e.dataTransfer.files[0];
+    if (f && f.type.startsWith("image/")) applyFile(f);
   };
 
   return (
-    <>
-      <h1 className="page-title">Tunnel Book Design Tool</h1>
-      <div className="controls-row">
-        <button className="upload-btn" onClick={() => fileRef.current?.click()}>
-          <Upload size={16} strokeWidth={2.5} />
-          Upload Image
-        </button>
+    <div className="home-screen">
+      <div className="home-hero">
+        <div className="home-tag">// AI-powered layer segmentation</div>
+        <h1 className="home-title">
+          Tunnel<span className="home-title-accent">Book</span>
+          <span className="home-title-small"> Generator</span>
+        </h1>
+        <div className="home-steps">
+          <span className="home-step">
+            <I.Upload size={11} /> upload image
+          </span>
+          <span className="home-step-arrow">→</span>
+          <span className="home-step">
+            <I.Brush size={11} /> select layers
+          </span>
+          <span className="home-step-arrow">→</span>
+          <span className="home-step">
+            <I.BookOpen size={11} /> preview in 3d
+          </span>
+          <span className="home-step-arrow">→</span>
+          <span className="home-step">
+            <I.Download size={11} /> export cut files
+          </span>
+        </div>
+      </div>
+
+      <div
+        className={`drop-zone ${isDragging ? "drop-zone--dragging" : ""} ${imageUrl ? "drop-zone--filled" : ""}`}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        onClick={() => !imageUrl && fileRef.current?.click()}
+      >
         <input
           ref={fileRef}
           type="file"
@@ -330,122 +1294,144 @@ function HomeScreen({
           style={{ display: "none" }}
           onChange={handleFile}
         />
-
-        <div className="layers-group">
-          <Layers size={15} className="layers-icon" />
-          <span className="layers-label">Book Layers:</span>
-          <input
-            className="layers-input"
-            type="text"
-            inputMode="numeric"
-            placeholder="0"
-            value={layerCount}
-            onChange={handleLayerInput}
-            maxLength={2}
-          />
-          <span className="layers-hint">max 10</span>
-        </div>
+        {imageUrl ? (
+          <div className="drop-zone-preview">
+            <img src={imageUrl} alt="Uploaded" />
+            <div className="drop-zone-overlay">
+              <button
+                className="drop-zone-change"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  fileRef.current?.click();
+                }}
+              >
+                <I.Upload /> change image
+              </button>
+            </div>
+            <div className="drop-zone-filename">{imageFile?.name}</div>
+          </div>
+        ) : (
+          <div className="drop-zone-empty">
+            <div className="drop-zone-icon">
+              <I.ImagePlus />
+            </div>
+            <div className="drop-zone-text">
+              {isDragging ? "drop it here!" : "drag & drop or click to upload"}
+            </div>
+            <div className="drop-zone-sub">PNG · JPG · WEBP</div>
+          </div>
+        )}
       </div>
 
-      <div className="controls-row">
-        <div className="mode-pill">
-          <button
-            className={`mode-pill-btn ${mode === "manual" ? "mode-pill-btn-active" : ""}`}
-            onClick={() => onModeChange("manual")}
-          >
-            Manual
-          </button>
-          <div className="mode-option">
+      <div className="config-row">
+        <div className="config-group">
+          <label className="config-label">
+            <I.Layers /> layers
+          </label>
+          <div className="config-input-wrap">
+            <input
+              className="config-input"
+              type="text"
+              inputMode="numeric"
+              placeholder="?"
+              value={layerCount}
+              onChange={(e) => {
+                const v = e.target.value.replace(/[^0-9]/g, "");
+                setLayerCount(!v || parseInt(v) <= 10 ? v : "10");
+              }}
+              maxLength={2}
+            />
+            <span className="config-max">/ 10</span>
+          </div>
+        </div>
+
+        <div className="config-group">
+          <label className="config-label">
+            <I.Settings /> default mode
+          </label>
+          <div className="mode-toggle">
             <button
-              className={`mode-pill-btn ${mode === "automatic" ? "mode-pill-btn-active" : ""}`}
-              onClick={() => onModeChange("automatic")}
+              className={`mode-toggle-btn ${exportMode === "outline" ? "mode-toggle-btn--active" : ""}`}
+              onClick={() => onExportModeChange("outline")}
             >
-              Automatic
+              <I.Scissors /> outline
+            </button>
+            <button
+              className={`mode-toggle-btn ${exportMode === "engraving" ? "mode-toggle-btn--active" : ""}`}
+              onClick={() => onExportModeChange("engraving")}
+            >
+              <I.Eye /> engrave
             </button>
           </div>
         </div>
-        <div className="mode-pill">
-          <button
-            className={`mode-pill-btn ${exportMode === "outline" ? "mode-pill-btn-active" : ""}`}
-            onClick={() => onExportModeChange("outline")}
-            title="Outline — red border cuts only"
-          >
-            Outline
-          </button>
-          <button
-            className={`mode-pill-btn ${exportMode === "engraving" ? "mode-pill-btn-active" : ""}`}
-            onClick={() => onExportModeChange("engraving")}
-            title="Engraving — red cuts + blue engraving"
-          >
-            Engrave
-          </button>
+
+        <div className="config-group">
+          <label className="config-label">
+            <I.Settings /> segmentation
+          </label>
+          <div className="mode-toggle">
+            <button
+              className={`mode-toggle-btn ${mode === "manual" ? "mode-toggle-btn--active" : ""}`}
+              onClick={() => onModeChange("manual")}
+              title="Click points to select each layer"
+            >
+              manual
+            </button>
+            <button
+              className={`mode-toggle-btn ${mode === "automatic" ? "mode-toggle-btn--active" : ""}`}
+              onClick={() => onModeChange("automatic")}
+              title="Auto-detect layers via depth estimation"
+            >
+              auto
+            </button>
+          </div>
         </div>
 
         <button
-          className={`go-btn ${canGo ? "go-btn-active" : "go-btn-disabled"}`}
-          onClick={handleGo}
+          className={`go-btn ${canGo ? "go-btn--active" : "go-btn--disabled"}`}
+          onClick={() => {
+            if (canGo && imageFile && imageUrl)
+              onGo(imageFile, imageUrl, parsed, mode);
+          }}
           disabled={!canGo}
         >
-          {isStarting ? "Starting…" : "Go!"}
-          {canGo && !isStarting && <ArrowRight size={16} strokeWidth={2.5} />}
+          {isStarting ? (
+            <>
+              <span className="go-btn-spinner" />
+              {startingStatus ? "processing…" : "loading…"}
+            </>
+          ) : (
+            <>
+              run <I.ArrowRight />
+            </>
+          )}
         </button>
       </div>
 
+      {isStarting && startingStatus && (
+        <div className="status-banner">
+          <span
+            className="go-btn-spinner"
+            style={{ display: "inline-block", marginRight: 8 }}
+          />
+          {startingStatus}
+        </div>
+      )}
+
       {error && (
-        <div className="backend-error">
-          <strong>Backend error:</strong> {error}
-          <div className="backend-error-sub">
-            Make sure the Python server is running and Vite is proxying{" "}
+        <div className="error-banner">
+          <span className="error-banner-tag">// error</span> {error}
+          <div className="error-banner-sub">
+            Ensure the Python server is running and Vite proxies{" "}
             <code>/api</code>.
           </div>
         </div>
       )}
-
-      {imageUrl ? (
-        <>
-          <div className="filename-pill">
-            <CheckCircle2
-              size={16}
-              className="filename-icon"
-              strokeWidth={2.5}
-            />
-            <span className="filename-text">{imageFile?.name}</span>
-          </div>
-          <div className="preview-card preview-card-uploaded">
-            <img src={imageUrl} alt="Uploaded" />
-          </div>
-        </>
-      ) : (
-        <div
-          className="preview-card drop-zone"
-          onClick={() => fileRef.current?.click()}
-        >
-          <div className="no-file-inner">
-            <div className="no-file-icon">
-              <ImagePlus size={40} strokeWidth={1.5} />
-            </div>
-            <span className="no-file-text">Click to upload an image</span>
-            <span className="no-file-sub">PNG · JPG · WEBP</span>
-          </div>
-        </div>
-      )}
-    </>
+    </div>
   );
 }
 
-// layer selection screen — user clicks points, SAM segments the region, result stored per layer
-interface LayerSelectionProps {
-  imageFile: File | null;
-  imageUrl: string;
-  sessionId: string;
-  sessionWidth: number;
-  sessionHeight: number;
-  totalLayers: number;
-  currentLayer: number;
-  completedLayers: CompletedLayer[];
-  onNext: (layer: CompletedLayer) => void;
-  onBack: () => void;
-}
+// ─── Layer Selection Screen ───────────────────────────────────────────────────
 
 function LayerSelectionScreen({
   imageFile,
@@ -456,169 +1442,266 @@ function LayerSelectionScreen({
   totalLayers,
   currentLayer,
   completedLayers,
+  exportMode,
   onNext,
   onBack,
-}: LayerSelectionProps) {
+  onMaskChange,
+}: {
+  imageFile: File | null;
+  imageUrl: string;
+  sessionId: string;
+  sessionWidth: number;
+  sessionHeight: number;
+  totalLayers: number;
+  currentLayer: number;
+  completedLayers: CompletedLayer[];
+  exportMode: ExportMode;
+  onNext: (l: CompletedLayer) => void;
+  onBack: () => void;
+  onMaskChange: (m: { maskUrl: string; color: LayerColor } | null) => void;
+}) {
   const imgRef = useRef<HTMLImageElement>(null);
   const currentMaskUrlRef = useRef<string | null>(null);
+  const segCtrl = useRef<AbortController | null>(null);
+  const segSeq = useRef(0);
 
   const [points, setPoints] = useState<SegmentPoint[]>([]);
   const [maskUrl, setMaskUrl] = useState<string | null>(null);
   const [maskBlob, setMaskBlob] = useState<Blob | null>(null);
-  const [isSegmenting, setIsSegmenting] = useState<boolean>(false);
+  const [isSegmenting, setIsSegmenting] = useState(false);
   const [segError, setSegError] = useState<string | null>(null);
-
-  const segmentController = useRef<AbortController | null>(null);
-  const segmentSeq = useRef<number>(0);
+  const [isSelectingRemaining, setIsSelectingRemaining] = useState(false);
+  const [layerMode, setLayerMode] = useState<ExportMode>(exportMode);
 
   const color = LAYER_COLORS[(currentLayer - 1) % LAYER_COLORS.length];
   const isLast = currentLayer === totalLayers;
 
-  // reset local selection when you move to a new layer
   useEffect(() => {
-    segmentController.current?.abort();
-    segmentController.current = null;
-    segmentSeq.current = 0;
+    onMaskChange(maskUrl ? { maskUrl, color } : null);
+  }, [maskUrl, color.solid]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    setPoints([]);
-    setMaskUrl(null);
-    setMaskBlob(null);
-    currentMaskUrlRef.current = null;
-
-    setIsSegmenting(false);
-    setSegError(null);
-  }, [currentLayer]);
-
-  // cleanup any in-progress request if user leaves the page
-  useEffect(() => {
-    return () => {
-      segmentController.current?.abort();
-      const url = currentMaskUrlRef.current;
-      if (url) {
+  const runSegment = async (nextPts: SegmentPoint[]) => {
+    segCtrl.current?.abort();
+    if (nextPts.length === 0) {
+      if (maskUrl) {
         try {
-          URL.revokeObjectURL(url);
+          URL.revokeObjectURL(maskUrl);
         } catch (_) {}
       }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleImageClick = async (e: React.MouseEvent) => {
-    const img = imgRef.current;
-    if (!img) return;
-
-    const rect = img.getBoundingClientRect();
-    const xRel = (e.clientX - rect.left) / rect.width;
-    const yRel = (e.clientY - rect.top) / rect.height;
-
-    // clicked outside
-    if (xRel < 0 || xRel > 1 || yRel < 0 || yRel > 1) return;
-
-    // IMPORTANT: backend expects pixel coords in the ORIGINAL image space.
-    // Use the session dimensions returned by /api/sessions.
-    const clamp = (v: number, lo: number, hi: number) =>
-      Math.min(hi, Math.max(lo, v));
-    const w = sessionWidth > 0 ? sessionWidth : img.naturalWidth;
-    const h = sessionHeight > 0 ? sessionHeight : img.naturalHeight;
-    const x = clamp(Math.round(xRel * (w - 1)), 0, w - 1);
-    const y = clamp(Math.round(yRel * (h - 1)), 0, h - 1);
-
-    const nextPoints = [...points, { x, y, xPct: xRel, yPct: yRel }];
-    setPoints(nextPoints);
-
-    // cancel any previous request (click spam)
-    segmentController.current?.abort();
-    const controller = new AbortController();
-    segmentController.current = controller;
-    const seq = ++segmentSeq.current;
-
+      setMaskUrl(null);
+      setMaskBlob(null);
+      currentMaskUrlRef.current = null;
+      setIsSegmenting(false);
+      return;
+    }
+    const ctrl = new AbortController();
+    segCtrl.current = ctrl;
+    const seq = ++segSeq.current;
     setIsSegmenting(true);
     setSegError(null);
-
     try {
-      const blob = await segmentMask(sessionId, nextPoints, controller.signal);
-      if (seq !== segmentSeq.current) return; // stale response
-
+      const blob = await segmentMask(sessionId, nextPts, ctrl.signal);
+      if (seq !== segSeq.current) return;
       const url = URL.createObjectURL(blob);
-
-      // revoke only the previous in-progress mask url for this same layer
       if (maskUrl) {
         URL.revokeObjectURL(maskUrl);
         if (currentMaskUrlRef.current === maskUrl)
           currentMaskUrlRef.current = null;
       }
-
       setMaskUrl(url);
       setMaskBlob(blob);
       currentMaskUrlRef.current = url;
     } catch (err: any) {
-      // ignore abort errors
-      if (err?.name === "AbortError") return;
-      setSegError(err?.message ?? "Segmentation failed");
+      if (err?.name !== "AbortError")
+        setSegError(err?.message ?? "Segmentation failed");
     } finally {
-      if (seq === segmentSeq.current) setIsSegmenting(false);
+      if (seq === segSeq.current) setIsSegmenting(false);
     }
   };
 
-  const handleClear = () => {
-    // clears the current layer
-    segmentController.current?.abort();
-    segmentSeq.current++;
+  useEffect(() => {
+    segCtrl.current?.abort();
+    segCtrl.current = null;
+    segSeq.current = 0;
+    setPoints([]);
+    setMaskUrl(null);
+    setMaskBlob(null);
+    currentMaskUrlRef.current = null;
+    setIsSegmenting(false);
+    setSegError(null);
+    setLayerMode(exportMode);
+    onMaskChange(null);
+  }, [currentLayer]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(
+    () => () => {
+      segCtrl.current?.abort();
+      const u = currentMaskUrlRef.current;
+      if (u)
+        try {
+          URL.revokeObjectURL(u);
+        } catch (_) {}
+    },
+    [],
+  );
+
+  /**
+   * Click handler. The img uses object-fit:contain inside a fixed-height container,
+   * so the img element's bounding rect = the container, not the visible pixel area.
+   * We must compute the rendered subrect from the natural aspect ratio.
+   *
+   * object-fit:contain letterboxing math:
+   *   rendered scale = min(containerW / naturalW, containerH / naturalH)
+   *   renderedW = naturalW * scale
+   *   renderedH = naturalH * scale
+   *   offsetX_in_container = (containerW - renderedW) / 2   (horizontal bars)
+   *   offsetY_in_container = (containerH - renderedH) / 2   (vertical bars)
+   */
+  // Click handler on the wrapper div. The wrapper is sized exactly to the image
+  // Use getBoundingClientRect on the img element — same approach as the working branch.
+  // clientX/clientY minus rect.left/top divided by rect.width/height gives correct
+  // fractional coords regardless of what child element was clicked (overlays, markers).
+  const handleWrapperClick = useCallback(
+    async (e: React.MouseEvent<HTMLDivElement>) => {
+      const img = imgRef.current;
+      if (!img) return;
+      const rect = img.getBoundingClientRect();
+      const xRel = (e.clientX - rect.left) / rect.width;
+      const yRel = (e.clientY - rect.top) / rect.height;
+      if (xRel < 0 || xRel > 1 || yRel < 0 || yRel > 1) return;
+      const w = sessionWidth > 0 ? sessionWidth : img.naturalWidth;
+      const h = sessionHeight > 0 ? sessionHeight : img.naturalHeight;
+      const x = Math.min(w - 1, Math.max(0, Math.round(xRel * (w - 1))));
+      const y = Math.min(h - 1, Math.max(0, Math.round(yRel * (h - 1))));
+      const nextPts = [...points, { x, y, xPct: xRel, yPct: yRel }];
+      setPoints(nextPts);
+      await runSegment(nextPts);
+    },
+    [points, sessionWidth, sessionHeight, runSegment],
+  ); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleRemovePoint = async (e: React.MouseEvent, idx: number) => {
+    e.stopPropagation();
+    const nextPts = points.filter((_, i) => i !== idx);
+    setPoints(nextPts);
+    await runSegment(nextPts);
+  };
+
+  const handleClear = () => {
+    segCtrl.current?.abort();
+    segSeq.current++;
     setIsSegmenting(false);
     setSegError(null);
     setPoints([]);
-
-    if (maskUrl) {
+    if (maskUrl)
       try {
         URL.revokeObjectURL(maskUrl);
       } catch (_) {}
-    }
     setMaskUrl(null);
     setMaskBlob(null);
     currentMaskUrlRef.current = null;
   };
 
-  const handleNext = () => {
-    if (!maskUrl || !maskBlob) return;
-    onNext({ maskUrl, maskBlob, points, color });
-    currentMaskUrlRef.current = null;
-  };
+  const handleSelectRemaining = useCallback(async () => {
+    const w = sessionWidth,
+      h = sessionHeight;
+    if (!w || !h) return;
+    setIsSelectingRemaining(true);
+    setSegError(null);
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d")!;
+      ctx.fillStyle = "rgba(255,255,255,1)";
+      ctx.fillRect(0, 0, w, h);
+      if (completedLayers.length > 0) {
+        ctx.globalCompositeOperation = "destination-out";
+        for (const layer of completedLayers) {
+          await new Promise<void>((res) => {
+            const img = new Image();
+            img.onload = () => {
+              ctx.drawImage(img, 0, 0, w, h);
+              res();
+            };
+            img.onerror = () => res();
+            img.src = layer.maskUrl;
+          });
+        }
+      }
+      const blob = await new Promise<Blob>((res, rej) =>
+        canvas.toBlob(
+          (b) => (b ? res(b) : rej(new Error("fail"))),
+          "image/png",
+        ),
+      );
+      const url = URL.createObjectURL(blob);
+      if (maskUrl)
+        try {
+          URL.revokeObjectURL(maskUrl);
+        } catch (_) {}
+      setMaskUrl(url);
+      setMaskBlob(blob);
+      currentMaskUrlRef.current = url;
+      setPoints([]);
+    } catch (err: any) {
+      setSegError(err?.message ?? "Failed to select remaining");
+    } finally {
+      setIsSelectingRemaining(false);
+    }
+  }, [completedLayers, sessionWidth, sessionHeight, maskUrl]);
 
-  const canAdvance = !!maskUrl && !!maskBlob && !isSegmenting;
+  const canAdvance =
+    !!maskUrl && !!maskBlob && !isSegmenting && !isSelectingRemaining;
 
   return (
-    <>
-      <h1 className="page-subtitle">
-        <Paintbrush2 size={26} className="subtitle-icon" strokeWidth={2} />
-        Layer Selection
-      </h1>
-
-      <div className="nav-row">
+    <div className="layer-screen">
+      <div className="layer-topbar">
         <button className="back-btn" onClick={onBack}>
-          <ChevronLeft size={16} strokeWidth={2.5} /> Back
+          <I.ChevronLeft /> back
         </button>
-        <span className="nav-filename" title={imageFile?.name}>
-          {imageFile?.name}
-        </span>
-        <div style={{ width: 88 }} />
+        <div className="layer-topbar-center">
+          <span className="layer-filename">{imageFile?.name}</span>
+          <div className="layer-badge" style={{ background: color.solid }}>
+            layer_{currentLayer.toString().padStart(2, "0")}
+          </div>
+          <span className="layer-of">of {totalLayers}</span>
+        </div>
+        <div className="layer-progress-wrap">
+          {Array.from({ length: totalLayers }, (_, i) => (
+            <div
+              key={i}
+              className={`progress-pip ${i < currentLayer - 1 ? "progress-pip--done" : i === currentLayer - 1 ? "progress-pip--active" : "progress-pip--pending"}`}
+              style={i === currentLayer - 1 ? { background: color.solid } : {}}
+            />
+          ))}
+        </div>
       </div>
 
-      <ProgressDots total={totalLayers} current={currentLayer} />
-
-      <div className="layer-card">
-        <div className="layer-card-title">
-          Selecting{" "}
-          <span className="layer-badge" style={{ background: color.stroke }}>
-            Layer {currentLayer}
-          </span>{" "}
-          of {totalLayers}
+      <div className="canvas-card">
+        <div className="canvas-tools">
+          <span className="canvas-tools-hint">
+            <I.Brush /> click anywhere on the image to place selection points
+          </span>
         </div>
 
-        <div className="canvas-wrap" onClick={handleImageClick}>
-          <img ref={imgRef} src={imageUrl} alt="Source" draggable={false} />
-
-          <div className="overlay-stack" aria-hidden="true">
+        {/* canvas-wrap is sized exactly to the image: width:100%, height:auto.
+            No object-fit, no letterbox. offsetX/offsetY on the div = pixel coords. */}
+        <div className="canvas-wrap" onClick={handleWrapperClick}>
+          <img
+            ref={imgRef}
+            src={imageUrl}
+            alt="Source"
+            draggable={false}
+            style={{
+              display: "block",
+              width: "100%",
+              height: "auto",
+              pointerEvents: "none",
+            }}
+          />
+          {/* Overlays use inset:0 — they cover exactly the image since the wrapper = image size */}
+          <div className="overlay-stack" aria-hidden>
             {completedLayers.map((l, i) => (
               <div
                 key={i}
@@ -641,160 +1724,209 @@ function LayerSelectionScreen({
               />
             )}
           </div>
-
-          <div className="points-stack" aria-hidden="true">
+          <div className="points-stack">
             {points.map((p, idx) => (
               <div
                 key={idx}
                 className="point-marker"
                 style={{ left: `${p.xPct * 100}%`, top: `${p.yPct * 100}%` }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleRemovePoint(e, idx);
+                }}
+                title="Click to remove this point"
               />
             ))}
           </div>
-
-          {isSegmenting && (
-            <div className="segmenting-pill" aria-live="polite">
-              Segmenting…
+          {(isSegmenting || isSelectingRemaining) && (
+            <div className="segmenting-pill">
+              <span className="segmenting-dot" />
+              {isSelectingRemaining ? "computing remaining…" : "segmenting…"}
             </div>
           )}
         </div>
+      </div>
 
-        <div className="points-meta">
-          <p className="draw-hint">
-            <Paintbrush2 size={13} className="hint-icon" />
-            Click <strong>multiple points</strong> to guide this layer (each
-            click is a selection and updates the mask)
-          </p>
-          <div className="points-right">
-            <div className="points-count" aria-live="polite">
-              {points.length} point{points.length === 1 ? "" : "s"}
-            </div>
+      <div className="layer-controls">
+        <div className="layer-controls-left">
+          <div className="points-pill">
+            {points.length} pt{points.length === 1 ? "" : "s"}
+          </div>
+          <button
+            className="ctrl-btn ctrl-btn--ghost"
+            onClick={handleClear}
+            disabled={points.length === 0 && !maskUrl && !isSegmenting}
+          >
+            clear
+          </button>
+          {isLast && (
             <button
-              className="clear-points-btn"
-              onClick={handleClear}
-              disabled={points.length === 0 && !maskUrl && !isSegmenting}
-              title="Clear points for this layer"
+              className="ctrl-btn ctrl-btn--wand"
+              onClick={handleSelectRemaining}
+              disabled={isSelectingRemaining || isSegmenting}
+              title="Fill everything not yet selected"
             >
-              Clear
+              <I.Wand />{" "}
+              {completedLayers.length > 0 ? "select remaining" : "select all"}
+            </button>
+          )}
+        </div>
+        <div className="layer-controls-right">
+          {segError && <span className="seg-error-inline">// {segError}</span>}
+
+          <div className="layer-mode-picker">
+            <span className="layer-mode-label">mode:</span>
+            <button
+              className={`layer-mode-btn ${layerMode === "outline" ? "layer-mode-btn--active" : ""}`}
+              onClick={() => setLayerMode("outline")}
+              title="Cut outline only (red)"
+            >
+              <I.Scissors size={11} /> outline
+            </button>
+            <button
+              className={`layer-mode-btn ${layerMode === "engraving" ? "layer-mode-btn--active" : ""}`}
+              onClick={() => setLayerMode("engraving")}
+              title="Cut + engrave (red + blue)"
+            >
+              <I.Eye size={11} /> engrave
             </button>
           </div>
-        </div>
 
-        {segError && <div className="seg-error">{segError}</div>}
-
-        {completedLayers.length > 0 && (
-          <div className="legend">
-            {completedLayers.map((l, i) => (
-              <div key={i} className="legend-item">
+          {completedLayers.length > 0 && (
+            <div className="completed-legend">
+              {completedLayers.map((l, i) => (
                 <div
-                  className="legend-dot"
-                  style={{ background: l.color.stroke }}
-                />
-                Layer {i + 1}
-                <Check size={11} strokeWidth={3} className="legend-check" />
-              </div>
-            ))}
-            <div
-              className="legend-item legend-item-active"
-              style={{ borderColor: color.stroke }}
-            >
+                  key={i}
+                  className="legend-chip"
+                  style={{
+                    background: l.color.solid + "22",
+                    border: `1px solid ${l.color.solid}66`,
+                  }}
+                >
+                  <div
+                    className="legend-chip-dot"
+                    style={{ background: l.color.solid }}
+                  />
+                  <span>{i + 1}</span>
+                  <I.Check />
+                </div>
+              ))}
               <div
-                className="legend-dot"
-                style={{ background: color.stroke }}
-              />
-              Layer {currentLayer}
-              <Paintbrush2 size={11} strokeWidth={2.5} />
+                className="legend-chip legend-chip--active"
+                style={{ border: `1.5px solid ${color.solid}` }}
+              >
+                <div
+                  className="legend-chip-dot"
+                  style={{ background: color.solid }}
+                />
+                <span>{currentLayer}</span>
+                <I.Brush />
+              </div>
             </div>
-          </div>
-        )}
-      </div>
-
-      <div className="next-row">
-        <button
-          className="next-btn"
-          onClick={handleNext}
-          disabled={!canAdvance}
-        >
-          {isLast ? (
-            <>
-              <CheckCircle2 size={16} strokeWidth={2.5} /> Submit Layers
-            </>
-          ) : (
-            <>
-              Next Layer <ChevronRight size={16} strokeWidth={2.5} />
-            </>
           )}
-        </button>
+          <button
+            className="next-btn"
+            onClick={() => {
+              if (maskUrl && maskBlob) {
+                onNext({ maskUrl, maskBlob, points, color, mode: layerMode });
+                currentMaskUrlRef.current = null;
+              }
+            }}
+            disabled={!canAdvance}
+          >
+            {isLast ? (
+              <>
+                <I.CheckCircle size={14} /> submit
+              </>
+            ) : (
+              <>
+                next <I.ChevronRight />
+              </>
+            )}
+          </button>
+        </div>
       </div>
-    </>
+    </div>
   );
 }
 
-// output screen — lists generated layer masks for download
-interface OutputScreenProps {
-  imageFile: File | null;
-  sessionId: string | null;
-  totalLayers: number;
-  completedLayers: CompletedLayer[];
-  onBack: () => void;
-  exportMode: ExportMode;
-  mode: Mode;
-  aiZip: Blob | null;
-}
+// ─── Output Screen ────────────────────────────────────────────────────────────
 
 function OutputScreen({
   imageFile,
+  imageUrl,
   sessionId,
+  sessionWidth,
+  sessionHeight,
   totalLayers,
   completedLayers,
+  layerModes,
   onBack,
   exportMode,
-  mode,
-  aiZip,
-}: OutputScreenProps) {
-  // strip extension so files are named e.g. "my-photo_Layer1.png"
+}: {
+  imageFile: File | null;
+  imageUrl: string | null;
+  sessionId: string | null;
+  sessionWidth: number;
+  sessionHeight: number;
+  totalLayers: number;
+  completedLayers: CompletedLayer[];
+  layerModes: ExportMode[];
+  onBack: () => void;
+  exportMode: ExportMode;
+}) {
   const baseName = imageFile
     ? imageFile.name.replace(/\.[^/.]+$/, "")
     : "output";
-
   const safeBase = baseName.replace(/\s+/g, "_");
   const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "");
-  const zipName = `TunnelBook_${safeBase}_${totalLayers}layers_${stamp}.zip`;
-  const aiZipName = `TunnelBook_${safeBase}_${totalLayers}layers_${stamp}_ai.zip`;
-
   const filenames = Array.from(
     { length: totalLayers },
     (_, i) => `${baseName}_Layer${i + 1}.png`,
   );
-
   const [isZipping, setIsZipping] = useState(false);
   const [zipError, setZipError] = useState<string | null>(null);
-
   const [isExportingAi, setIsExportingAi] = useState(false);
   const [aiExportError, setAiExportError] = useState<string | null>(null);
 
-  const handleDownloadAi = async () => {
-    if (!sessionId) return;
-    setAiExportError(null);
-    setIsExportingAi(true);
+  const loadImg = (src: string) =>
+    new Promise<HTMLImageElement>((res, rej) => {
+      const img = new Image();
+      img.onload = () => res(img);
+      img.onerror = rej;
+      img.src = src;
+    });
+  const toBlob = (c: HTMLCanvasElement) =>
+    new Promise<Blob>((res, rej) =>
+      c.toBlob((b) => (b ? res(b) : rej(new Error("fail"))), "image/png"),
+    );
 
-    try {
-      const maskBlobs = completedLayers.map((l) => l.maskBlob);
-      const zipBlob = await exportAiLayers(
-        sessionId,
-        maskBlobs,
-        72,
-        exportMode,
-      );
-      downloadBlob(aiZipName, zipBlob);
-    } catch (err: any) {
-      setAiExportError(err?.message ?? "AI export failed");
-    } finally {
-      setIsExportingAi(false);
-    }
+  const compose = async (maskBlob: Blob) => {
+    if (!imageUrl) throw new Error("Missing image URL");
+    const w = sessionWidth,
+      h = sessionHeight;
+    if (!w || !h) throw new Error("Missing dimensions");
+    const base = await loadImg(imageUrl);
+    const mu = URL.createObjectURL(maskBlob);
+    const maskImg = await loadImg(mu).finally(() => URL.revokeObjectURL(mu));
+    const cut = document.createElement("canvas");
+    cut.width = w;
+    cut.height = h;
+    const cc = cut.getContext("2d")!;
+    cc.drawImage(base, 0, 0, w, h);
+    cc.globalCompositeOperation = "destination-in";
+    cc.drawImage(maskImg, 0, 0, w, h);
+    const out = document.createElement("canvas");
+    out.width = w;
+    out.height = h;
+    const oc = out.getContext("2d")!;
+    oc.fillStyle = "#fff";
+    oc.fillRect(0, 0, w, h);
+    oc.drawImage(cut, 0, 0);
+    return toBlob(out);
   };
 
-  const downloadBlob = (name: string, blob: Blob) => {
+  const dlBlob = (name: string, blob: Blob) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -806,183 +1938,181 @@ function OutputScreen({
   const handleDownloadAll = async () => {
     setZipError(null);
     setIsZipping(true);
-
     try {
-      const zip = new JSZip();
-      const missing: number[] = [];
-
+      const zip = new JSZip(),
+        missing: number[] = [];
       for (let i = 0; i < filenames.length; i++) {
-        const name = filenames[i];
-        const maskBlob = completedLayers[i]?.maskBlob;
-        if (!maskBlob) {
+        const mb = completedLayers[i]?.maskBlob;
+        if (!mb) {
           missing.push(i + 1);
           continue;
         }
-        zip.file(name, maskBlob);
+        zip.file(filenames[i], await compose(mb));
       }
-
-      if (missing.length > 0) {
+      if (missing.length)
         zip.file(
-          "README_missing_layers.txt",
-          `Missing layer masks: ${missing.join(", ")}
-`,
+          "README_missing.txt",
+          `Missing layers: ${missing.join(", ")}\n`,
         );
-      }
-
-      const zipBlob = await zip.generateAsync({ type: "blob" });
-      downloadBlob(zipName, zipBlob);
+      dlBlob(
+        `TunnelBook_${safeBase}_${totalLayers}layers_${stamp}.zip`,
+        await zip.generateAsync({ type: "blob" }),
+      );
     } catch (err: any) {
-      setZipError(err?.message ?? "Failed to create zip");
+      setZipError(err?.message ?? "Failed");
     } finally {
       setIsZipping(false);
     }
   };
 
+  const handleDownloadAi = async () => {
+    if (!sessionId) return;
+    setAiExportError(null);
+    setIsExportingAi(true);
+    try {
+      console.log(completedLayers);
+      const layerData = completedLayers.map((l, i) => ({
+        maskBlob: l.maskBlob,
+        mode: layerModes[i] ?? l.mode ?? ("outline" as ExportMode),
+        index: i,
+      }));
+      dlBlob(
+        `TunnelBook_${safeBase}_ai_${stamp}.zip`,
+        await exportAiLayersPerMode(sessionId, layerData, 72),
+      );
+    } catch (err: any) {
+      setAiExportError(err?.message ?? "AI export failed");
+    } finally {
+      setIsExportingAi(false);
+    }
+  };
+
   return (
-    <>
-      <h1 className="page-subtitle">
-        <CheckCircle2 size={26} className="subtitle-icon" strokeWidth={2} />
-        Your Layers Are Ready!
-      </h1>
-
-      <div className="nav-row">
+    <div className="output-screen">
+      <div className="output-topbar">
         <button className="back-btn" onClick={onBack}>
-          <ChevronLeft size={16} strokeWidth={2.5} /> Back
+          <I.ChevronLeft /> back
         </button>
-        <div className="nav-center">
-          <div className="nav-filename-full">{imageFile?.name}</div>
-          <div className="complete-badge">
-            <CheckCircle2 size={12} strokeWidth={2.5} />
-            All {totalLayers} layers complete
-          </div>
+        <div className="output-title">
+          <I.CheckCircle /> <span>all_layers_complete</span>
         </div>
-        <div style={{ width: 88 }} />
+        <div className="output-badge">{totalLayers} layers</div>
       </div>
-
       <div className="output-card">
+        <div className="output-card-header">// {imageFile?.name}</div>
         {filenames.map((name, i) => (
           <div key={i} className="output-row">
             <div className="output-row-left">
               <div
                 className="output-dot"
                 style={{
-                  background: completedLayers[i]?.color.stroke ?? "#999",
+                  background: completedLayers[i]?.color.stroke ?? "#aaa",
                 }}
               />
-              <div className="output-names">
+              <div className="output-info">
                 <span className="output-filename">{name}</span>
-                <span className="output-layer-tag">Layer {i + 1}</span>
+                <div className="output-meta">
+                  <span className="output-layer-tag">
+                    layer_{(i + 1).toString().padStart(2, "0")}
+                  </span>
+                  <span className="output-mode-tag">
+                    {(layerModes[i] ?? "outline") === "outline" ? (
+                      <>
+                        <I.Scissors /> outline
+                      </>
+                    ) : (
+                      <>
+                        <I.Eye /> engrave
+                      </>
+                    )}
+                  </span>
+                </div>
               </div>
             </div>
             <button
               className="download-btn"
               onClick={async () => {
-                const maskBlob = completedLayers[i]?.maskBlob;
-                if (!maskBlob) return;
-                downloadBlob(name, maskBlob);
+                const mb = completedLayers[i]?.maskBlob;
+                if (mb) dlBlob(name, await compose(mb));
               }}
-              title={`Download ${name}`}
             >
-              <Download size={18} strokeWidth={2} />
-              Download
+              <I.Download /> .png
             </button>
           </div>
         ))}
       </div>
-
-      <button
-        className="download-all-btn"
-        onClick={handleDownloadAll}
-        disabled={isZipping}
-      >
-        <DownloadCloud size={18} strokeWidth={2.5} />
-        {isZipping ? "Preparing Zip…" : "Download All Layers (.zip)"}
-      </button>
-
-      {mode === "automatic" && aiZip ? (
+      <div className="output-actions">
         <button
-          className="download-all-btn"
-          onClick={() => downloadBlob(aiZipName, aiZip)}
-          style={{
-            marginTop: 10,
-            background: "linear-gradient(135deg, #dc2626, #991b1b)",
-          }}
+          className="action-btn action-btn--zip"
+          onClick={handleDownloadAll}
+          disabled={isZipping}
         >
-          <DownloadCloud size={18} strokeWidth={2.5} />
-          Download as .ai (Adobe Illustrator)
+          <I.DownloadCloud /> {isZipping ? "zipping…" : "download_all.zip"}
         </button>
-      ) : null}
-
-      {mode === "manual" && sessionId ? (
         <button
-          className="download-all-btn"
+          className="action-btn action-btn--ai"
           onClick={handleDownloadAi}
           disabled={isExportingAi || !sessionId}
-          style={{
-            marginTop: 10,
-            background: "linear-gradient(135deg, #dc2626, #991b1b)",
-          }}
         >
-          <DownloadCloud size={18} strokeWidth={2.5} />
-          {isExportingAi
-            ? "Vectorising…"
-            : "Download as .ai (Adobe Illustrator)"}
+          <I.DownloadCloud /> {isExportingAi ? "vectorising…" : "export_as.ai"}
         </button>
-      ) : null}
-
-      {aiExportError && (
-        <div className="seg-error" style={{ marginTop: 10 }}>
-          {aiExportError}
+      </div>
+      {(zipError || aiExportError) && (
+        <div className="error-banner">
+          <span className="error-banner-tag">// error</span>{" "}
+          {zipError || aiExportError}
         </div>
       )}
-
-      {zipError && (
-        <div className="seg-error" style={{ marginTop: 10 }}>
-          {zipError}
-        </div>
-      )}
-    </>
+    </div>
   );
 }
 
-// root app — screen routing and shared state
-
-type Screen = "home" | "layers" | "output";
+// ─── App Root ─────────────────────────────────────────────────────────────────
 
 function App() {
   const [screen, setScreen] = useState<Screen>("home");
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [totalLayers, setTotalLayers] = useState<number>(0);
-  const [currentLayer, setCurrentLayer] = useState<number>(1);
+  const [totalLayers, setTotalLayers] = useState(0);
+  const [currentLayer, setCurrentLayer] = useState(1);
   const [completedLayers, setCompletedLayers] = useState<CompletedLayer[]>([]);
-  const [showHelp, setShowHelp] = useState<boolean>(false);
+  const [layerModes, setLayerModes] = useState<ExportMode[]>([]);
+  const [showHelp, setShowHelp] = useState(false);
   const [exportMode, setExportMode] = useState<ExportMode>("outline");
-  const [mode, setMode] = useState<Mode>("manual");
-
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [sessionWidth, setSessionWidth] = useState<number>(0);
-  const [sessionHeight, setSessionHeight] = useState<number>(0);
-  const [isStarting, setIsStarting] = useState<boolean>(false);
-  const [backendError, setBackendError] = useState<string | null>(null);
+  const [sessionWidth, setSessionWidth] = useState(0);
+  const [sessionHeight, setSessionHeight] = useState(0);
+  const [mode, setMode] = useState<Mode>("manual");
+  const [startingStatus, setStartingStatus] = useState<string | null>(null);
   const [aiZip, setAiZip] = useState<Blob | null>(null);
+  const [isStarting, setIsStarting] = useState(false);
+  const [backendError, setBackendError] = useState<string | null>(null);
+  const [inProgressMask, setInProgressMask] = useState<{
+    maskUrl: string;
+    color: LayerColor;
+  } | null>(null);
 
-  const resetAndCleanup = async () => {
+  const [vizDocked, setVizDocked] = useState(true);
+  const [vizPos, setVizPos] = useState<{ x: number; y: number } | null>(null);
+
+  const reset = async () => {
     completedLayers.forEach((l) => {
       try {
         URL.revokeObjectURL(l.maskUrl);
       } catch (_) {}
     });
-
     if (sessionId) await deleteSession(sessionId);
-
     setSessionId(null);
     setSessionWidth(0);
     setSessionHeight(0);
     setCompletedLayers([]);
+    setLayerModes([]);
     setCurrentLayer(1);
     setTotalLayers(0);
     setBackendError(null);
+    setInProgressMask(null);
+    setAiZip(null);
+    setStartingStatus(null);
   };
 
   const handleGo = async (
@@ -993,26 +2123,32 @@ function App() {
   ) => {
     setMode(selectedMode);
     setBackendError(null);
+    setStartingStatus(null);
+    setAiZip(null);
     setIsStarting(true);
-
     try {
       if (selectedMode === "automatic") {
-        const { sessionId, width, height } = await createAutomaticSession(file);
-        setSessionId(sessionId);
-        setSessionWidth(width);
-        setSessionHeight(height);
+        setStartingStatus("Creating session…");
+        const {
+          sessionId: sid,
+          width,
+          height,
+        } = await createAutomaticSession(file);
         setImageFile(file);
         setImageUrl(url);
         setTotalLayers(count);
-        const pngZip = await automaticLayers(sessionId, count, 72, exportMode);
-        const aiZipBlob = await automaticAiLayers(sessionId);
+        setSessionId(sid);
+        setSessionWidth(width);
+        setSessionHeight(height);
+        setStartingStatus("Running depth estimation — this may take ~30s…");
+        const pngZip = await automaticLayers(sid, count, 72, exportMode);
+        setStartingStatus("Fetching vector files…");
+        const aiZipBlob = await automaticAiLayers(sid);
         setAiZip(aiZipBlob);
-        // Load PNGs from zip
         const zip = await JSZip.loadAsync(pngZip);
         const layers: CompletedLayer[] = [];
         for (let i = 0; i < count; i++) {
-          const fileName = `layer_${i + 1}.png`;
-          const zipFile = zip.file(fileName);
+          const zipFile = zip.file(`layer_${i + 1}.png`);
           if (zipFile) {
             const blob = await zipFile.async("blob");
             layers.push({
@@ -1020,97 +2156,161 @@ function App() {
               maskBlob: blob,
               points: [],
               color: LAYER_COLORS[i % LAYER_COLORS.length],
+              mode: exportMode,
             });
           }
         }
         setCompletedLayers(layers);
-        console.log(count);
-        console.log(layers);
+        setLayerModes(layers.map(() => exportMode));
         setScreen("output");
       } else {
-        const { sessionId, width, height } = await createSession(file);
+        const { sessionId: sid, width, height } = await createSession(file);
         setImageFile(file);
         setImageUrl(url);
         setTotalLayers(count);
         setCurrentLayer(1);
         setCompletedLayers([]);
-        setSessionId(sessionId);
+        setLayerModes([]);
+        setSessionId(sid);
         setSessionWidth(width);
         setSessionHeight(height);
         setScreen("layers");
       }
     } catch (err: any) {
-      setBackendError(err?.message ?? "Failed to start session");
+      setBackendError(err?.message ?? "Failed to start backend");
     } finally {
       setIsStarting(false);
+      setStartingStatus(null);
     }
   };
 
-  // layer progression: stores each completed layer and advances to the next, or to output.
   const handleNext = (layer: CompletedLayer) => {
     const newCompleted = [...completedLayers, layer];
     setCompletedLayers(newCompleted);
+    setLayerModes((prev) => [...prev, layer.mode]);
+    setInProgressMask(null);
     if (currentLayer >= totalLayers) setScreen("output");
-    else setCurrentLayer((prev) => prev + 1);
+    else setCurrentLayer((p) => p + 1);
   };
 
-  const handleBackToHome = () => {
+  const handleBack = () => {
     setScreen("home");
-    resetAndCleanup();
+    reset();
   };
+
+  const showViz = screen === "layers" || completedLayers.length > 0;
 
   return (
-    <div className="app-wrap">
-      <Bubbles />
-
-      <button
-        className="help-btn"
-        onClick={() => setShowHelp(true)}
-        title="How it works"
+    <div className="app-root">
+      <Stars />
+      <Sidebar
+        screen={screen}
+        totalLayers={totalLayers}
+        currentLayer={currentLayer}
+        completedCount={completedLayers.length}
+        onGoHome={handleBack}
+      />
+      <main
+        className={`app-main ${vizDocked && showViz ? "app-main--docked" : ""}`}
       >
-        ?
-      </button>
+        <div className="main-inner">
+          {screen === "home" && (
+            <HomeScreen
+              onGo={handleGo}
+              isStarting={isStarting}
+              startingStatus={startingStatus}
+              error={backendError}
+              exportMode={exportMode}
+              onExportModeChange={setExportMode}
+              mode={mode}
+              onModeChange={setMode}
+            />
+          )}
+          {screen === "layers" && imageUrl && sessionId && (
+            <LayerSelectionScreen
+              imageFile={imageFile}
+              imageUrl={imageUrl}
+              sessionId={sessionId}
+              sessionWidth={sessionWidth}
+              sessionHeight={sessionHeight}
+              totalLayers={totalLayers}
+              currentLayer={currentLayer}
+              completedLayers={completedLayers}
+              exportMode={exportMode}
+              onNext={handleNext}
+              onBack={handleBack}
+              onMaskChange={setInProgressMask}
+            />
+          )}
+          {screen === "output" && (
+            <OutputScreen
+              imageFile={imageFile}
+              imageUrl={imageUrl}
+              sessionId={sessionId}
+              sessionWidth={sessionWidth}
+              sessionHeight={sessionHeight}
+              totalLayers={totalLayers}
+              completedLayers={completedLayers}
+              layerModes={layerModes}
+              onBack={handleBack}
+              exportMode={exportMode}
+            />
+          )}
+        </div>
 
-      {screen === "home" && (
-        <HomeScreen
-          onGo={handleGo}
-          isStarting={isStarting}
-          error={backendError}
-          exportMode={exportMode}
-          onExportModeChange={setExportMode}
-          mode={mode}
-          onModeChange={setMode}
-        />
-      )}
+        {showViz && (
+          <div
+            className={`viz-float ${vizDocked ? "viz-float--docked" : ""}`}
+            style={
+              !vizDocked && vizPos
+                ? {
+                    bottom: "auto",
+                    right: "auto",
+                    top: vizPos.y,
+                    left: vizPos.x,
+                  }
+                : undefined
+            }
+          >
+            <BookVisualizer
+              completedLayers={completedLayers}
+              totalLayers={totalLayers}
+              layerModes={layerModes}
+              inProgressMask={inProgressMask}
+              locked={screen === "output"}
+              onLayerModeChange={(i, m) =>
+                setLayerModes((prev) => prev.map((x, j) => (j === i ? m : x)))
+              }
+              onDockedChange={(d) => {
+                setVizDocked(d);
+                if (d) setVizPos(null);
+              }}
+              onDragStart={(startX, startY, panelX, panelY) => {
+                const onMove = (e: MouseEvent) => {
+                  setVizPos({
+                    x: panelX + (e.clientX - startX),
+                    y: panelY + (e.clientY - startY),
+                  });
+                };
+                const onUp = () => {
+                  window.removeEventListener("mousemove", onMove);
+                  window.removeEventListener("mouseup", onUp);
+                };
+                window.addEventListener("mousemove", onMove);
+                window.addEventListener("mouseup", onUp);
+              }}
+            />
+          </div>
+        )}
 
-      {screen === "layers" && imageUrl && sessionId && (
-        <LayerSelectionScreen
-          imageFile={imageFile}
-          imageUrl={imageUrl}
-          sessionId={sessionId}
-          sessionWidth={sessionWidth}
-          sessionHeight={sessionHeight}
-          totalLayers={totalLayers}
-          currentLayer={currentLayer}
-          completedLayers={completedLayers}
-          onNext={handleNext}
-          onBack={handleBackToHome}
-        />
-      )}
-
-      {screen === "output" && (
-        <OutputScreen
-          imageFile={imageFile}
-          sessionId={sessionId}
-          totalLayers={totalLayers}
-          completedLayers={completedLayers}
-          onBack={handleBackToHome}
-          exportMode={exportMode}
-          mode={mode}
-          aiZip={aiZip}
-        />
-      )}
-
+        <button
+          className="help-btn"
+          onClick={() => setShowHelp(true)}
+          title="How it works"
+        >
+          ?
+        </button>
+      </main>
       {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
     </div>
   );
