@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+pydantic
+Pillow
+opencv-python
+torch
+torchvision
+numpy
+matplotlib
+scikit-image
+segment-anything

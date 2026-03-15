@@ -267,8 +267,10 @@ class TunnelBookGenerator:
         for layer_idx, (orig_i, edata) in enumerate(valid_layers):
             outer_ps = _mask_to_closed_ps_paths(
                 self.layer_masks[orig_i].astype(np.uint8) * 255, px_to_pt, img_h_pt)
+            contours_inner, _ = cv2.findContours(
+                edata["inner"], cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
             inner_ps = _contours_to_ps_paths(
-                edata["inner"], px_to_pt, img_h_pt)
+                contours_inner, px_to_pt, img_h_pt)
 
             per_layer_outer.append(outer_ps)
             per_layer_inner.append(inner_ps)
@@ -339,7 +341,6 @@ _CUT_RGB = (1.0, 0.0, 0.0)   # red   – outer cut
 _ENGRAVE_RGB = (0.0, 0.0, 1.0)   # blue  – inner engrave
 
 
-
 def _smooth_contour(pts: np.ndarray, epsilon: float = 1.0, chaikin_iters: int = 2) -> np.ndarray:
     """
     Lightly smooth a contour:
@@ -350,7 +351,7 @@ def _smooth_contour(pts: np.ndarray, epsilon: float = 1.0, chaikin_iters: int = 
     """
     # Step 1 — remove micro-jitter
     approx = cv2.approxPolyDP(pts.reshape(-1, 1, 2).astype(np.float32),
-                               epsilon=epsilon, closed=True)
+                              epsilon=epsilon, closed=True)
     pts = approx.squeeze().astype(np.float64)
     if pts.ndim == 1:
         pts = pts[np.newaxis, :]
@@ -371,31 +372,49 @@ def _smooth_contour(pts: np.ndarray, epsilon: float = 1.0, chaikin_iters: int = 
     return pts
 
 
-def _contours_to_ps_paths(edge_map: np.ndarray, px_to_pt: float, img_h_pt: float,
-                          close: bool = True, min_area_px: float = 150.0) -> list[str]:
-    """
-    Trace contours from a single-channel edge map and return a list of
+def _contours_to_ps_paths(contours: list[np.ndarray], px_to_pt: float, img_h_pt: float,
+                          close: bool = True, min_area_px: float = 10.0) -> list[str]:
+    """Trace contours from a list of contours and return a list of
     PostScript path command strings (one string per contour).
+
     Y is flipped to convert from image-space (y=0 top) to PS-space (y=0 bottom).
-    Contours smaller than min_area_px (default 150 px²) are discarded.
-    A small smoothing pass is applied to each contour before conversion.
+
+    This function is intentionally lenient by default so that small-but-visible
+    edges are not discarded before export. When needed, callers can pass a
+    larger `min_area_px` to filter fine noise.
     """
-    contours, _ = cv2.findContours(
-        edge_map, cv2.RETR_LIST, cv2.CHAIN_APPROX_TC89_KCOS)
     ps_paths = []
     for contour in contours:
         if len(contour) < 2:
             continue
         if cv2.contourArea(contour) < min_area_px:
             continue
-        pts = _smooth_contour(contour.squeeze() if contour.squeeze().ndim > 1
-                              else contour.squeeze()[np.newaxis, :])
+
+        # Simplify contour geometry to reduce path complexity and file size.
+        # Keep enough detail so shapes still look like the source image.
+        peri = cv2.arcLength(contour, True)
+        eps = max(0.5, 0.005 * peri)
+        approx = cv2.approxPolyDP(contour, eps, True)
+
+        # If the approximation still has too many points, downsample.
+        # We only downsample very large contours to avoid making the file huge.
+        pts_raw = (approx.squeeze() if approx.squeeze().ndim > 1
+                   else approx.squeeze()[np.newaxis, :])
+        if len(pts_raw) > 5000:
+            # keep only every Nth point to cap complexity
+            step = int(np.ceil(len(pts_raw) / 5000))
+            pts_raw = pts_raw[::step]
+
+        # Smooth slightly (optional) to avoid jagged edges
+        pts = _smooth_contour(pts_raw)
+
         cmds = []
         for j, (px, py) in enumerate(pts):
             ps_x = px * px_to_pt
             ps_y = img_h_pt - py * px_to_pt
+            # Reduce precision to keep file sizes down
             cmds.append(
-                f"{ps_x:.4f} {ps_y:.4f} {'moveto' if j == 0 else 'lineto'}")
+                f"{ps_x:.2f} {ps_y:.2f} {'moveto' if j == 0 else 'lineto'}")
         if close:
             cmds.append("closepath")
         ps_paths.append("\n".join(cmds))
@@ -403,12 +422,12 @@ def _contours_to_ps_paths(edge_map: np.ndarray, px_to_pt: float, img_h_pt: float
 
 
 def _mask_to_closed_ps_paths(mask_uint8: np.ndarray, px_to_pt: float,
-                              img_h_pt: float, min_area_px: float = 150.0) -> list[str]:
-    """
-    Derive closed outer-silhouette paths directly from a binary mask using
+                             img_h_pt: float, min_area_px: float = 20.0) -> list[str]:
+    """Derive closed outer-silhouette paths directly from a binary mask using
     cv2.findContours (RETR_EXTERNAL) rather than Canny edge detection.
+
     This guarantees every returned path is a fully-closed loop — no gaps.
-    Contours smaller than min_area_px (default 150 px²) are discarded.
+    Contours smaller than min_area_px (default 20 px²) are discarded.
     A small smoothing pass is applied before conversion.
     """
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
@@ -434,7 +453,6 @@ def _mask_to_closed_ps_paths(mask_uint8: np.ndarray, px_to_pt: float,
         cmds.append("closepath")
         ps_paths.append("\n".join(cmds))
     return ps_paths
-
 
 
 def _build_ai_header(artboard_w: float, artboard_h: float) -> str:
