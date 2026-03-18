@@ -242,6 +242,24 @@ const I = {
       <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
     </svg>
   ),
+  Manual: ({ size = 13 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M8 11V8a1 1 0 0 1 2 0v3" />
+      <path d="M12 11V4a1 1 0 0 1 2 0v7" />
+      <path d="M16 11V6a1 1 0 0 1 2 0v5" />
+      <path d="M8 11c-1.5 0-3 .8-3 2.5V15a6 6 0 0 0 6 6h2a6 6 0 0 0 6-6v-4" />
+      <path d="M5 13V11a1 1 0 0 1 2 0v2" />
+    </svg>
+  ),
   Settings: ({ size = 13 }: { size?: number }) => (
     <svg
       width={size}
@@ -468,7 +486,7 @@ async function createSession(imageFile: File) {
   if (!res.ok)
     throw new Error(
       (await res.text().catch(() => "")) ||
-        `Failed to start session (${res.status})`,
+      `Failed to start session (${res.status})`,
     );
   return res.json() as Promise<{
     sessionId: string;
@@ -487,7 +505,7 @@ async function createAutomaticSession(imageFile: File) {
   if (!res.ok)
     throw new Error(
       (await res.text().catch(() => "")) ||
-        `Failed to start session (${res.status})`,
+      `Failed to start session (${res.status})`,
     );
   return res.json() as Promise<{
     sessionId: string;
@@ -541,14 +559,14 @@ async function segmentMask(
   if (!res.ok)
     throw new Error(
       (await res.text().catch(() => "")) ||
-        `Segmentation failed (${res.status})`,
+      `Segmentation failed (${res.status})`,
     );
   return res.blob();
 }
 
 async function deleteSession(sessionId: string) {
   await fetch(apiUrl(`/api/sessions/${sessionId}`), { method: "DELETE" }).catch(
-    () => {},
+    () => { },
   );
 }
 
@@ -604,7 +622,7 @@ async function exportAiLayersPerMode(
     if (!res.ok)
       throw new Error(
         (await res.text().catch(() => "")) ||
-          `AI export failed for layer ${layer.index + 1}`,
+        `AI export failed for layer ${layer.index + 1}`,
       );
     const zipBlob = await res.blob();
     const innerZip = await JSZip.loadAsync(zipBlob);
@@ -1375,14 +1393,14 @@ function HomeScreen({
               onClick={() => onModeChange("manual")}
               title="Click points to select each layer"
             >
-              manual
+              <I.Manual /> manual
             </button>
             <button
               className={`mode-toggle-btn ${mode === "automatic" ? "mode-toggle-btn--active" : ""}`}
               onClick={() => onModeChange("automatic")}
               title="Auto-detect layers via depth estimation"
             >
-              auto
+              <I.Wand /> auto
             </button>
           </div>
         </div>
@@ -1486,7 +1504,7 @@ function LayerSelectionScreen({
       if (maskUrl) {
         try {
           URL.revokeObjectURL(maskUrl);
-        } catch (_) {}
+        } catch (_) { }
       }
       setMaskUrl(null);
       setMaskBlob(null);
@@ -1540,7 +1558,7 @@ function LayerSelectionScreen({
       if (u)
         try {
           URL.revokeObjectURL(u);
-        } catch (_) {}
+        } catch (_) { }
     },
     [],
   );
@@ -1596,7 +1614,7 @@ function LayerSelectionScreen({
     if (maskUrl)
       try {
         URL.revokeObjectURL(maskUrl);
-      } catch (_) {}
+      } catch (_) { }
     setMaskUrl(null);
     setMaskBlob(null);
     currentMaskUrlRef.current = null;
@@ -1639,7 +1657,7 @@ function LayerSelectionScreen({
       if (maskUrl)
         try {
           URL.revokeObjectURL(maskUrl);
-        } catch (_) {}
+        } catch (_) { }
       setMaskUrl(url);
       setMaskBlob(blob);
       currentMaskUrlRef.current = url;
@@ -2099,7 +2117,7 @@ function App() {
     completedLayers.forEach((l) => {
       try {
         URL.revokeObjectURL(l.maskUrl);
-      } catch (_) {}
+      } catch (_) { }
     });
     if (sessionId) await deleteSession(sessionId);
     setSessionId(null);
@@ -2264,11 +2282,11 @@ function App() {
             style={
               !vizDocked && vizPos
                 ? {
-                    bottom: "auto",
-                    right: "auto",
-                    top: vizPos.y,
-                    left: vizPos.x,
-                  }
+                  bottom: "auto",
+                  right: "auto",
+                  top: vizPos.y,
+                  left: vizPos.x,
+                }
                 : undefined
             }
           >

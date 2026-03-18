@@ -1261,6 +1261,7 @@ body {
   transition: all 0.18s;
   white-space: nowrap;
   margin-left: auto;
+  margin-top: 22px;
 }
 
 .go-btn--disabled {
