@@ -519,13 +519,15 @@ async function automaticLayers(
   numLayers: number,
   dpi = 72,
   mode: ExportMode = "outline",
+  frameWidthIn = 12,
+  frameHeightIn = 9,
+  frameBorderIn = 0.5,
 ) {
-  // print the parameters being sent to the backend for debugging
-  console.log({ num_layers: numLayers, dpi, mode });
+  console.log({ num_layers: numLayers, dpi, mode, frame_width_in: frameWidthIn, frame_height_in: frameHeightIn, frame_border_in: frameBorderIn });
   const res = await fetch(apiUrl(`/api/sessions/${sessionId}/automatic`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ num_layers: numLayers, dpi, mode }),
+    body: JSON.stringify({ num_layers: numLayers, dpi, mode, frame_width_in: frameWidthIn, frame_height_in: frameHeightIn, frame_border_in: frameBorderIn }),
   });
 
   if (!res.ok) {
@@ -570,11 +572,32 @@ async function deleteSession(sessionId: string) {
   );
 }
 
+async function exportStand(
+  sessionId: string,
+  nLayers: number,
+  spokeH = 1.4,
+  baseH = 0.65,
+) {
+  const res = await fetch(apiUrl(`/api/sessions/${sessionId}/export-stand`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ n_layers: nLayers, spoke_h_in: spokeH, base_h_in: baseH }),
+  });
+  if (!res.ok)
+    throw new Error(
+      (await res.text().catch(() => "")) || `Stand export failed (${res.status})`,
+    );
+  return res.blob();
+}
+
 async function exportAiLayers(
   sessionId: string,
   maskBlobs: Blob[],
   dpi = 72,
   mode: ExportMode = "outline",
+  frameWidthIn = 12,
+  frameHeightIn = 9,
+  frameBorderIn = 0.5,
 ) {
   const toBase64 = (blob: Blob): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -587,7 +610,7 @@ async function exportAiLayers(
   const res = await fetch(apiUrl(`/api/sessions/${sessionId}/export-ai`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ masks_b64, dpi, mode }),
+    body: JSON.stringify({ masks_b64, dpi, mode, frame_width_in: frameWidthIn, frame_height_in: frameHeightIn, frame_border_in: frameBorderIn }),
   });
   if (!res.ok)
     throw new Error(
@@ -600,6 +623,9 @@ async function exportAiLayersPerMode(
   sessionId: string,
   layers: Array<{ maskBlob: Blob; mode: ExportMode; index: number }>,
   dpi = 72,
+  frameWidthIn = 12,
+  frameHeightIn = 9,
+  frameBorderIn = 0.5,
 ): Promise<Blob> {
   const toBase64 = (blob: Blob): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -616,7 +642,7 @@ async function exportAiLayersPerMode(
     const res = await fetch(apiUrl(`/api/sessions/${sessionId}/export-ai`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ masks_b64: [b64], dpi, mode: layer.mode }),
+      body: JSON.stringify({ masks_b64: [b64], dpi, mode: layer.mode, frame_width_in: frameWidthIn, frame_height_in: frameHeightIn, frame_border_in: frameBorderIn }),
     });
 
     if (!res.ok)
@@ -1230,7 +1256,7 @@ function HomeScreen({
   mode,
   onModeChange,
 }: {
-  onGo: (f: File, url: string, n: number, mode: Mode) => void;
+  onGo: (f: File, url: string, n: number, mode: Mode, frameWidthIn: number, frameHeightIn: number, frameBorderIn: number) => void;
   isStarting: boolean;
   startingStatus: string | null;
   error: string | null;
@@ -1242,11 +1268,28 @@ function HomeScreen({
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [layerCount, setLayerCount] = useState("");
+  const [frameWidthIn, setFrameWidthIn] = useState("12");
+  const [frameHeightIn, setFrameHeightIn] = useState("9");
+  const [frameBorderIn, setFrameBorderIn] = useState("0.5");
   const [isDragging, setIsDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const parsed = parseInt(layerCount, 10);
-  const canGo = !!imageUrl && parsed >= 1 && parsed <= 10 && !isStarting;
+  const parsedW = parseFloat(frameWidthIn);
+  const parsedH = parseFloat(frameHeightIn);
+  const parsedB = parseFloat(frameBorderIn);
+  const frameValid =
+    !isNaN(parsedW) && parsedW >= 1 && parsedW <= 30 &&
+    !isNaN(parsedH) && parsedH >= 1 && parsedH <= 30 &&
+    !isNaN(parsedB) && parsedB >= 0 && parsedB <= 4;
+  const canGo = !!imageUrl && parsed >= 1 && parsed <= 10 && !isStarting && frameValid;
+
+  const clampNum = (v: string, min: number, max: number) => {
+    const n = parseFloat(v);
+    if (isNaN(n)) return v;
+    if (n > max) return String(max);
+    return v;
+  };
 
   const applyFile = (f: File) => {
     setImageFile(f);
@@ -1270,6 +1313,9 @@ function HomeScreen({
     const f = e.dataTransfer.files[0];
     if (f && f.type.startsWith("image/")) applyFile(f);
   };
+
+  const outerW = frameValid ? (parsedW + 2 * parsedB).toFixed(2) : "—";
+  const outerH = frameValid ? (parsedH + 2 * parsedB).toFixed(2) : "—";
 
   return (
     <div className="home-screen">
@@ -1341,6 +1387,7 @@ function HomeScreen({
         )}
       </div>
 
+      {/* ── Row 1: layers / mode / segmentation / run ── */}
       <div className="config-row">
         <div className="config-group">
           <label className="config-label">
@@ -1409,7 +1456,7 @@ function HomeScreen({
           className={`go-btn ${canGo ? "go-btn--active" : "go-btn--disabled"}`}
           onClick={() => {
             if (canGo && imageFile && imageUrl)
-              onGo(imageFile, imageUrl, parsed, mode);
+              onGo(imageFile, imageUrl, parsed, mode, parsedW, parsedH, parsedB);
           }}
           disabled={!canGo}
         >
@@ -1424,6 +1471,92 @@ function HomeScreen({
             </>
           )}
         </button>
+      </div>
+
+      {/* ── Row 2: frame dimensions ── */}
+      <div className="config-row config-row--frame">
+        <div className="frame-row-label">
+          <I.Scissors size={11} /> frame dimensions
+        </div>
+        <div className="config-group">
+          <label className="config-label">inner width</label>
+          <div className="config-input-wrap config-input-wrap--sm">
+            <input
+              className="config-input config-input--sm"
+              type="text"
+              inputMode="decimal"
+              placeholder="12"
+              value={frameWidthIn}
+              onChange={(e) => {
+                const v = e.target.value.replace(/[^0-9.]/g, "");
+                setFrameWidthIn(clampNum(v, 1, 30));
+              }}
+            />
+            <span className="config-max">/ 30 in</span>
+          </div>
+        </div>
+
+        <div className="config-group">
+          <label className="config-label">inner height</label>
+          <div className="config-input-wrap config-input-wrap--sm">
+            <input
+              className="config-input config-input--sm"
+              type="text"
+              inputMode="decimal"
+              placeholder="9"
+              value={frameHeightIn}
+              onChange={(e) => {
+                const v = e.target.value.replace(/[^0-9.]/g, "");
+                setFrameHeightIn(clampNum(v, 1, 30));
+              }}
+            />
+            <span className="config-max">/ 30 in</span>
+          </div>
+        </div>
+
+        <div className="config-group">
+          <label className="config-label">border gap</label>
+          <div className="config-input-wrap config-input-wrap--sm">
+            <input
+              className="config-input config-input--sm"
+              type="text"
+              inputMode="decimal"
+              placeholder="0.5"
+              value={frameBorderIn}
+              onChange={(e) => {
+                const v = e.target.value.replace(/[^0-9.]/g, "");
+                setFrameBorderIn(clampNum(v, 0, 4));
+              }}
+            />
+            <span className="config-max">/ 4 in</span>
+          </div>
+        </div>
+
+        {/* Always-visible summary — no layout shift */}
+        <div className={`frame-summary ${!frameValid ? "frame-summary--warn" : ""}`}>
+          {frameValid ? (
+            <>
+              <span className="frame-summary-item">
+                <span className="frame-summary-key">inner</span>
+                {parsedW}" × {parsedH}"
+              </span>
+              <span className="frame-summary-sep">·</span>
+              <span className="frame-summary-item">
+                <span className="frame-summary-key">border</span>
+                {parsedB}"
+              </span>
+              <span className="frame-summary-sep">·</span>
+              <span className="frame-summary-item">
+                <span className="frame-summary-key">outer</span>
+                {outerW}" × {outerH}"
+              </span>
+              <span className="frame-summary-sep">·</span>
+              <span className="frame-summary-note">identical across all layers</span>
+            </>
+          ) : (
+            <span className="frame-summary-warn-text">⚠ enter valid dimensions to continue</span>
+          )}
+        </div>
       </div>
 
       {isStarting && startingStatus && (
@@ -1881,6 +2014,9 @@ function OutputScreen({
   layerModes,
   onBack,
   exportMode,
+  frameWidthIn,
+  frameHeightIn,
+  frameBorderIn,
 }: {
   imageFile: File | null;
   imageUrl: string | null;
@@ -1892,6 +2028,9 @@ function OutputScreen({
   layerModes: ExportMode[];
   onBack: () => void;
   exportMode: ExportMode;
+  frameWidthIn: number;
+  frameHeightIn: number;
+  frameBorderIn: number;
 }) {
   const baseName = imageFile
     ? imageFile.name.replace(/\.[^/.]+$/, "")
@@ -1906,6 +2045,8 @@ function OutputScreen({
   const [zipError, setZipError] = useState<string | null>(null);
   const [isExportingAi, setIsExportingAi] = useState(false);
   const [aiExportError, setAiExportError] = useState<string | null>(null);
+  const [isExportingStand, setIsExportingStand] = useState(false);
+  const [standExportError, setStandExportError] = useState<string | null>(null);
 
   const loadImg = (src: string) =>
     new Promise<HTMLImageElement>((res, rej) => {
@@ -1996,12 +2137,28 @@ function OutputScreen({
       }));
       dlBlob(
         `TunnelBook_${safeBase}_ai_${stamp}.zip`,
-        await exportAiLayersPerMode(sessionId, layerData, 72),
+        await exportAiLayersPerMode(sessionId, layerData, 72, frameWidthIn, frameHeightIn, frameBorderIn),
       );
     } catch (err: any) {
       setAiExportError(err?.message ?? "AI export failed");
     } finally {
       setIsExportingAi(false);
+    }
+  };
+
+  const handleDownloadStand = async () => {
+    if (!sessionId) return;
+    setStandExportError(null);
+    setIsExportingStand(true);
+    try {
+      dlBlob(
+        `TunnelBook_${safeBase}_stand_${stamp}.ai`,
+        await exportStand(sessionId, totalLayers),
+      );
+    } catch (err: any) {
+      setStandExportError(err?.message ?? "Stand export failed");
+    } finally {
+      setIsExportingStand(false);
     }
   };
 
@@ -2074,11 +2231,19 @@ function OutputScreen({
         >
           <I.DownloadCloud /> {isExportingAi ? "vectorising…" : "export_as.ai"}
         </button>
+        <button
+          className="action-btn action-btn--stand"
+          onClick={handleDownloadStand}
+          disabled={isExportingStand || !sessionId}
+          title={`Generate a ${totalLayers}-slot laser-cut stand`}
+        >
+          <I.DownloadCloud /> {isExportingStand ? "generating…" : "export_stand.ai"}
+        </button>
       </div>
-      {(zipError || aiExportError) && (
+      {(zipError || aiExportError || standExportError) && (
         <div className="error-banner">
           <span className="error-banner-tag">// error</span>{" "}
-          {zipError || aiExportError}
+          {zipError || aiExportError || standExportError}
         </div>
       )}
     </div>
@@ -2105,6 +2270,9 @@ function App() {
   const [aiZip, setAiZip] = useState<Blob | null>(null);
   const [isStarting, setIsStarting] = useState(false);
   const [backendError, setBackendError] = useState<string | null>(null);
+  const [frameWidthIn, setFrameWidthIn] = useState(12);
+  const [frameHeightIn, setFrameHeightIn] = useState(9);
+  const [frameBorderIn, setFrameBorderIn] = useState(0.5);
   const [inProgressMask, setInProgressMask] = useState<{
     maskUrl: string;
     color: LayerColor;
@@ -2131,6 +2299,9 @@ function App() {
     setInProgressMask(null);
     setAiZip(null);
     setStartingStatus(null);
+    setFrameWidthIn(12);
+    setFrameHeightIn(9);
+    setFrameBorderIn(0.5);
   };
 
   const handleGo = async (
@@ -2138,8 +2309,14 @@ function App() {
     url: string,
     count: number,
     selectedMode: Mode,
+    frameWidthIn: number,
+    frameHeightIn: number,
+    frameBorderIn: number,
   ) => {
     setMode(selectedMode);
+    setFrameWidthIn(frameWidthIn);
+    setFrameHeightIn(frameHeightIn);
+    setFrameBorderIn(frameBorderIn);
     setBackendError(null);
     setStartingStatus(null);
     setAiZip(null);
@@ -2159,7 +2336,7 @@ function App() {
         setSessionWidth(width);
         setSessionHeight(height);
         setStartingStatus("Running depth estimation — this may take ~30s…");
-        const pngZip = await automaticLayers(sid, count, 72, exportMode);
+        const pngZip = await automaticLayers(sid, count, 72, exportMode, frameWidthIn, frameHeightIn, frameBorderIn);
         setStartingStatus("Fetching vector files…");
         const aiZipBlob = await automaticAiLayers(sid);
         setAiZip(aiZipBlob);
@@ -2272,6 +2449,9 @@ function App() {
               layerModes={layerModes}
               onBack={handleBack}
               exportMode={exportMode}
+              frameWidthIn={frameWidthIn}
+              frameHeightIn={frameHeightIn}
+              frameBorderIn={frameBorderIn}
             />
           )}
         </div>

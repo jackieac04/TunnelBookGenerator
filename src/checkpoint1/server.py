@@ -19,7 +19,7 @@ from points import TunnelBookGenerator
 app = FastAPI()
 
 MODEL_TYPE = "vit_h"
-CHECKPOINT_PATH = "src/checkpoint1/sam_vit_h_4b8939.pth"
+CHECKPOINT_PATH = "sam_vit_h_4b8939.pth"
 
 
 class SegmentRequest(BaseModel):
@@ -31,15 +31,27 @@ class ExportAiRequest(BaseModel):
     masks_b64: list[str]
     dpi: int = 72
     mode: str = "outline"
+    frame_width_in: float = 12.0
+    frame_height_in: float = 9.0
+    frame_border_in: float = 0.5
 
 
 class AutomaticRequest(BaseModel):
     num_layers: int
     dpi: int = 72
     mode: str = "outline"
+    frame_width_in: float = 12.0
+    frame_height_in: float = 9.0
+    frame_border_in: float = 0.5
 
 
 _sessions: dict[str, dict] = {}
+
+
+class StandRequest(BaseModel):
+    n_layers: int
+    spoke_h_in: float = 1.4
+    base_h_in: float = 0.65
 
 
 @app.get("/api/health")
@@ -234,7 +246,8 @@ async def export_ai(session_id: str, req: ExportAiRequest):
     # Vectorise
     try:
         ai_files = _vectorise_to_memory(
-            layer_masks, image_rgb, edge_data, dpi=req.dpi, mode=req.mode)
+            layer_masks, image_rgb, edge_data, dpi=req.dpi, mode=req.mode,
+            frame_width_in=req.frame_width_in, frame_height_in=req.frame_height_in, frame_border_in=req.frame_border_in)
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Vectorisation failed: {e}")
@@ -345,7 +358,8 @@ async def automatic(session_id: str, req: AutomaticRequest):
 
     try:
         ai_files = _vectorise_to_memory(
-            layer_masks, img_rgb, edge_data, dpi=req.dpi, mode=req.mode)
+            layer_masks, img_rgb, edge_data, dpi=req.dpi, mode=req.mode,
+            frame_width_in=req.frame_width_in, frame_height_in=req.frame_height_in, frame_border_in=req.frame_border_in)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(
@@ -404,7 +418,8 @@ def detect_edges(layer_masks, img_rgb, canny_low=30, canny_high=100):
     return edge_data
 
 
-def _vectorise_to_memory(layer_masks, image_rgb, edge_data, dpi: int, mode: str = "outline") -> dict[str, str]:
+def _vectorise_to_memory(layer_masks, image_rgb, edge_data, dpi: int, mode: str = "outline",
+                         frame_width_in: float = 12.0, frame_height_in: float = 9.0, frame_border_in: float = 0.5) -> dict[str, str]:
     from points import (
         _contours_to_ps_paths, _mask_to_closed_ps_paths, _build_ai_document,
         _build_ai_header, _build_ai_footer, _build_layer_block,
@@ -413,15 +428,17 @@ def _vectorise_to_memory(layer_masks, image_rgb, edge_data, dpi: int, mode: str 
     ARTBOARD_W_PT = 32 * 72
     ARTBOARD_H_PT = 18 * 72
     STROKE_WIDTH = 0.072
-    MAX_CONTENT_PT = 12 * 72
+    MAX_CONTENT_W_PT = frame_width_in * 72
+    MAX_CONTENT_H_PT = frame_height_in * 72
+    BORDER_PT = frame_border_in * 72
 
     img_h_px, img_w_px = image_rgb.shape[:2]
     px_to_pt = 72.0 / dpi
     img_w_pt = img_w_px * px_to_pt
     img_h_pt = img_h_px * px_to_pt
 
-    content_scale = min(MAX_CONTENT_PT / img_w_pt,
-                        MAX_CONTENT_PT / img_h_pt, 1.0)
+    content_scale = min(MAX_CONTENT_W_PT / img_w_pt,
+                        MAX_CONTENT_H_PT / img_h_pt, 1.0)
     content_w_pt = img_w_pt * content_scale
     content_h_pt = img_h_pt * content_scale
     content_offset_x = (ARTBOARD_W_PT - content_w_pt) / 2.0
@@ -439,7 +456,7 @@ def _vectorise_to_memory(layer_masks, image_rgb, edge_data, dpi: int, mode: str 
     cell_w = (ARTBOARD_W_PT - padding_pt * (layout_cols + 1)) / layout_cols
     cell_h = (ARTBOARD_H_PT - padding_pt * (layout_rows + 1)) / layout_rows
     scale_to_cell = min(cell_w / img_w_pt, cell_h / img_h_pt,
-                        MAX_CONTENT_PT / img_w_pt, MAX_CONTENT_PT / img_h_pt)
+                        MAX_CONTENT_W_PT / img_w_pt, MAX_CONTENT_H_PT / img_h_pt)
     cell_content_w_pt = img_w_pt * scale_to_cell
     cell_content_h_pt = img_h_pt * scale_to_cell
 
@@ -479,6 +496,7 @@ def _vectorise_to_memory(layer_masks, image_rgb, edge_data, dpi: int, mode: str 
             mode=mode,
             content_w_pt=content_w_pt,
             content_h_pt=content_h_pt,
+            border_pt=BORDER_PT,
         )
         results[f"layer_{orig_i + 1}.ai"] = ai_content
 
@@ -509,10 +527,11 @@ def _vectorise_to_memory(layer_masks, image_rgb, edge_data, dpi: int, mode: str 
                 mode=mode,
                 content_w_pt=cell_content_w_pt,
                 content_h_pt=cell_content_h_pt,
+                border_pt=BORDER_PT,
             )
         )
 
-    if combined_blocks:
+    if len(combined_blocks) > 1:
         combined = _build_ai_header(ARTBOARD_W_PT, ARTBOARD_H_PT)
         combined += "\n".join(combined_blocks)
         combined += _build_ai_footer()
@@ -521,6 +540,33 @@ def _vectorise_to_memory(layer_masks, image_rgb, edge_data, dpi: int, mode: str 
     return results
 
 
+@app.post("/api/sessions/{session_id}/export-stand")
+async def export_stand(session_id: str, req: StandRequest):
+    sess = _sessions.get(session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Unknown session")
+    if req.n_layers < 1:
+        raise HTTPException(status_code=400, detail="n_layers must be at least 1")
+
+    from points import build_stand_ai
+    try:
+        ai_content = build_stand_ai(
+            n_layers=req.n_layers,
+            spoke_h_in=req.spoke_h_in,
+            base_h_in=req.base_h_in,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Stand generation failed: {e}")
+
+    base = re.sub(r'[^\x00-\x7F]+', '_', sess["filename"].rsplit(".", 1)[0])
+    return Response(
+        content=ai_content.encode("latin-1"),
+        media_type="application/postscript",
+        headers={"Content-Disposition": f'attachment; filename="{base}_stand.ai"'},
+    )
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+    

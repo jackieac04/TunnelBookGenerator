@@ -538,16 +538,18 @@ def _build_layer_block(outer_paths: list[str], inner_paths: list[str],
                        stroke_width: float, layer_name: str = "Layer",
                        mode: str = "outline",
                        content_w_pt: float = 0.0,
-                       content_h_pt: float = 0.0) -> str:
+                       content_h_pt: float = 0.0,
+                       border_pt: float = 0.5 * 72) -> str:
     """
     PostScript block for one layer.
     Outer paths → red (cut).
     Inner paths → blue (engrave) — only when mode == 'engraving'.
-    A ½" red border rectangle is always drawn around the content area.
+    A border rectangle is always drawn around the content area.
     content_w_pt / content_h_pt are the unscaled artboard dimensions of the
     content so the border rect can be placed correctly.
+    border_pt is the gap (in points) between the inner and outer frame rectangles.
     """
-    BORDER_PT = 0.5 * 72  # ½ inch in points
+    BORDER_PT = border_pt
 
     lines = [
         f"% --- {layer_name} ---",
@@ -575,7 +577,8 @@ def _build_ai_document(artboard_w: float, artboard_h: float,
                        stroke_width: float, layer_name: str = "Layer",
                        mode: str = "outline",
                        content_w_pt: float = 0.0,
-                       content_h_pt: float = 0.0) -> str:
+                       content_h_pt: float = 0.0,
+                       border_pt: float = 0.5 * 72) -> str:
     """Full single-layer .ai document."""
     doc = _build_ai_header(artboard_w, artboard_h)
     doc += _build_layer_block(
@@ -589,6 +592,100 @@ def _build_ai_document(artboard_w: float, artboard_h: float,
         mode=mode,
         content_w_pt=content_w_pt,
         content_h_pt=content_h_pt,
+        border_pt=border_pt,
+    )
+    doc += _build_ai_footer()
+    return doc
+
+
+def build_stand_ai(
+    n_layers: int,
+    spoke_h_in: float = 1.4,
+    base_h_in: float = 0.65,
+    spoke_w_in: float = 0.2,
+    gap_in: float = 0.16,
+    tri_w_in: float = 0.5,
+) -> str:
+    r"""
+    Generate a laser-cutter-ready .ai file for the tunnel book stand.
+
+    ONE single closed shape: a comb whose outer left and right edges are the
+    hypotenuses of right-angle triangles, giving the piece its lean.
+
+    Dimensions:
+      spoke_w_in = 0.20"  wall width of each spoke
+      gap_in     = 0.16"  slot width (one slot per layer)
+      spoke_h_in = 1.40"  height of spokes above the base
+      base_h_in  = 0.65"  height of the solid base bar
+      tri_w_in   = 0.50"  how far the triangle foot extends beyond
+                           the outermost spoke at the bottom
+
+    Total width at bottom = tri_w_in + teeth_w + tri_w_in
+    Total width at top    = teeth_w  (= (n_layers+1)*spoke_w + n_layers*gap)
+    Total height          = base_h_in + spoke_h_in
+    """
+    PT = 72.0
+    SW = spoke_w_in * PT
+    GW = gap_in     * PT
+    SH = spoke_h_in * PT
+    BH = base_h_in  * PT
+    TW = tri_w_in   * PT
+
+    n_spokes = n_layers + 1
+    n_gaps   = n_layers
+    teeth_w  = n_spokes * SW + n_gaps * GW
+    total_h  = BH + SH
+    base_w   = 2 * TW + teeth_w
+
+    margin = 0.25 * PT
+    art_w  = base_w  + 2 * margin
+    art_h  = total_h + 2 * margin
+
+    ox = margin
+    oy = margin
+
+    def ps_path(pts: list) -> str:
+        cmds = []
+        for j, (px, py) in enumerate(pts):
+            cmds.append(f"{px:.4f} {py:.4f} {'moveto' if j == 0 else 'lineto'}")
+        cmds.append("closepath")
+        return "\n".join(cmds)
+
+    def stroke_block(path_ps: str, label: str) -> str:
+        r, g, b = _CUT_RGB
+        return (
+            f"% --- {label} ---\n"
+            f"gsave\n"
+            f"{r:.4f} {g:.4f} {b:.4f} setrgbcolor\n"
+            f"0.0720 setlinewidth\n"
+            f"1 setlinecap\n1 setlinejoin\n[] 0 setdash\n"
+            f"newpath\n{path_ps}\nstroke\ngrestore\n"
+        )
+
+    # Single closed path traced clockwise:
+    # bottom-left tip -> bottom-right tip -> top-right spoke ->
+    # (comb teeth right-to-left with slot notches) -> top-left spoke ->
+    # back to bottom-left tip via closepath (left hypotenuse)
+    pts = []
+    pts.append((ox, oy))                          # bottom-left tip
+    pts.append((ox + base_w, oy))                 # bottom-right tip
+    pts.append((ox + TW + teeth_w, oy + total_h)) # top of rightmost spoke
+
+    for i in range(n_gaps - 1, -1, -1):
+        g_right = ox + TW + (i + 1) * (SW + GW)
+        g_left  = ox + TW + (i + 1) *  SW + i * GW
+        pts.append((g_right, oy + total_h))   # arrive at right edge of slot
+        pts.append((g_right, oy + BH))        # drop to slot floor
+        pts.append((g_left,  oy + BH))        # cross slot floor
+        pts.append((g_left,  oy + total_h))   # rise from slot
+
+    pts.append((ox + TW, oy + total_h))           # top of leftmost spoke
+
+    doc  = _build_ai_header(art_w, art_h)
+    doc += stroke_block(
+        ps_path(pts),
+        f"Stand - {n_layers} layer{'s' if n_layers != 1 else ''} "
+        f"({n_spokes} spokes, {n_gaps} slots)"
     )
     doc += _build_ai_footer()
     return doc
@@ -634,3 +731,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
