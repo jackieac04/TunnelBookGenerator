@@ -200,6 +200,15 @@ class TunnelBookGenerator:
             blurred = cv2.GaussianBlur(gray, (5, 5), 0)
             inner_edges = cv2.Canny(blurred, canny_low, canny_high)
 
+            # Reduce double lines to single centerline using morphological skeleton
+            # This extracts the medial axis at single-pixel width
+            if np.any(inner_edges):
+                # Dilate slightly to ensure edges connect
+                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+                inner_edges = cv2.dilate(inner_edges, kernel, iterations=1)
+                # Apply thinning to get single-pixel skeleton
+                inner_edges = cv2.ximgproc.thinning(inner_edges)
+
             # Remove any inner edges that overlap the outer silhouette to keep
             # the two sets clean and non-redundant
             inner_edges = cv2.bitwise_and(
@@ -228,6 +237,10 @@ class TunnelBookGenerator:
         px_to_pt = 72.0 / dpi
         img_w_pt = img_w_px * px_to_pt
         img_h_pt = img_h_px * px_to_pt
+        
+        # Calculate 3% of total image area for filtering small pieces
+        total_area_px = img_h_px * img_w_px
+        min_area_px_threshold = total_area_px * 0.03
 
         # Scale to fit within 12"×12", preserving aspect ratio
         content_scale = min(MAX_CONTENT_PT / img_w_pt,
@@ -268,11 +281,11 @@ class TunnelBookGenerator:
 
         for layer_idx, (orig_i, edata) in enumerate(valid_layers):
             outer_ps = _mask_to_closed_ps_paths(
-                self.layer_masks[orig_i].astype(np.uint8) * 255, px_to_pt, img_h_pt)
+                self.layer_masks[orig_i].astype(np.uint8) * 255, px_to_pt, img_h_pt, min_area_px=min_area_px_threshold)
             contours_inner, _ = cv2.findContours(
                 edata["inner"], cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
             inner_ps = _contours_to_ps_paths(
-                contours_inner, px_to_pt, img_h_pt)
+                contours_inner, px_to_pt, img_h_pt, close=False, min_area_px=min_area_px_threshold)
 
             per_layer_outer.append(outer_ps)
             per_layer_inner.append(inner_ps)
@@ -343,13 +356,13 @@ _CUT_RGB = (1.0, 0.0, 0.0)   # red   – outer cut
 _ENGRAVE_RGB = (0.0, 0.0, 1.0)   # blue  – inner engrave
 
 
-def _smooth_contour(pts: np.ndarray, epsilon: float = 1.0, chaikin_iters: int = 2) -> np.ndarray:
+def _smooth_contour(pts: np.ndarray, epsilon: float = 1.0, chaikin_iters: int = 4) -> np.ndarray:
     """
-    Lightly smooth a contour:
+    Smooth a contour:
     1. approxPolyDP removes sub-pixel jitter (epsilon=1.0 px — very conservative).
-    2. Chaikin subdivision (2 passes) rounds sharp corners into gentle curves
+    2. Chaikin subdivision (4 passes) rounds sharp corners into gentle curves
        by cutting each corner at the 1/4 and 3/4 points of every edge.
-    Both steps are intentionally small so the overall shape is barely changed.
+    The 4 iterations provide smoother, less jagged results.
     """
     # Step 1 — remove micro-jitter
     approx = cv2.approxPolyDP(pts.reshape(-1, 1, 2).astype(np.float32),
@@ -375,7 +388,7 @@ def _smooth_contour(pts: np.ndarray, epsilon: float = 1.0, chaikin_iters: int = 
 
 
 def _contours_to_ps_paths(contours: list[np.ndarray], px_to_pt: float, img_h_pt: float,
-                          close: bool = True, min_area_px: float = 10.0) -> list[str]:
+                          close: bool = True, min_area_px: float = None) -> list[str]:
     """Trace contours from a list of contours and return a list of
     PostScript path command strings (one string per contour).
 
@@ -389,7 +402,7 @@ def _contours_to_ps_paths(contours: list[np.ndarray], px_to_pt: float, img_h_pt:
     for contour in contours:
         if len(contour) < 2:
             continue
-        if cv2.contourArea(contour) < min_area_px:
+        if min_area_px is not None and cv2.contourArea(contour) < min_area_px:
             continue
 
         # Simplify contour geometry to reduce path complexity and file size.
@@ -424,7 +437,7 @@ def _contours_to_ps_paths(contours: list[np.ndarray], px_to_pt: float, img_h_pt:
 
 
 def _mask_to_closed_ps_paths(mask_uint8: np.ndarray, px_to_pt: float,
-                             img_h_pt: float, min_area_px: float = 20.0) -> list[str]:
+                             img_h_pt: float, min_area_px: float = None) -> list[str]:
     """Derive closed outer-silhouette paths directly from a binary mask using
     cv2.findContours (RETR_EXTERNAL) rather than Canny edge detection.
 
@@ -442,7 +455,7 @@ def _mask_to_closed_ps_paths(mask_uint8: np.ndarray, px_to_pt: float,
     for contour in contours:
         if len(contour) < 3:
             continue
-        if cv2.contourArea(contour) < min_area_px:
+        if min_area_px is not None and cv2.contourArea(contour) < min_area_px:
             continue
         pts = _smooth_contour(contour.squeeze() if contour.squeeze().ndim > 1
                               else contour.squeeze()[np.newaxis, :])
